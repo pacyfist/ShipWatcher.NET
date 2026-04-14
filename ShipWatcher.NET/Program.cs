@@ -58,6 +58,14 @@ var headerLabel = new Label(FormatRow("MMSI", "Name", "Position", "SOG", "COG", 
     Visible = false,
 };
 
+var darkScheme = new ColorScheme
+{
+    Normal = Application.Driver.MakeAttribute(Color.White, Color.Black),
+    Focus = Application.Driver.MakeAttribute(Color.Black, Color.BrightCyan),
+    HotNormal = Application.Driver.MakeAttribute(Color.BrightGreen, Color.Black),
+    HotFocus = Application.Driver.MakeAttribute(Color.Black, Color.BrightCyan),
+};
+
 var vesselList = new ListView()
 {
     X = 0,
@@ -66,6 +74,7 @@ var vesselList = new ListView()
     Height = Dim.Fill() - 6,
     CanFocus = true,
     Visible = false,
+    ColorScheme = darkScheme,
 };
 
 // --- Detail panel ---
@@ -75,6 +84,7 @@ var detailFrame = new FrameView("Vessel Detail")
     Y = Pos.AnchorEnd(5),
     Width = Dim.Fill(),
     Height = 5,
+    ColorScheme = darkScheme,
 };
 
 var detailLabel = new Label("Select a vessel to see details (Tab to switch view)")
