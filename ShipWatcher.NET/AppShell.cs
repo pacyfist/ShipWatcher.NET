@@ -159,8 +159,7 @@ public class AppShell
             .Where(v => string.IsNullOrEmpty(_nameFilter) ||
                          v.Name.Contains(_nameFilter, StringComparison.OrdinalIgnoreCase) ||
                          v.MMSI.ToString().Contains(_nameFilter))
-            .OrderByDescending(v => v.LastUpdate)
-            .Take(2000)
+            .OrderBy(v => v.MMSI)
             .ToList();
 
         _views[_activeViewIndex].RefreshData(vessels);
