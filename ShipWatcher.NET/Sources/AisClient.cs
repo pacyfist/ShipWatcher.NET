@@ -4,12 +4,12 @@ using System.Text;
 using System.Text.Json;
 using Serilog;
 
-namespace ShipWatcher.NET;
+namespace ShipWatcher.NET.Sources;
 
-public class AisClient : IAisDataSource
+public class AisClient : IAisDataSource, ISourceDescriptor
 {
-    private readonly string _apiKey;
-    private readonly double[][][] _boundingBoxes;
+    private string _apiKey;
+    private double[][][] _boundingBoxes;
     private ClientWebSocket? _ws;
     private CancellationTokenSource? _cts;
     private static readonly ILogger Log = new LoggerConfiguration()
@@ -28,6 +28,23 @@ public class AisClient : IAisDataSource
     public string SourceName => "aisstream.io";
 
     public event Action? OnDataUpdated;
+
+    // ISourceDescriptor
+    public string DisplayLabel => "aisstream.io (global, requires API key)";
+
+    public IReadOnlyList<SourceConfigField> ConfigFields =>
+    [
+        new("apiKey", "API Key", _apiKey, IsSensitive: true)
+    ];
+
+    public string? ValidateConfig() =>
+        string.IsNullOrWhiteSpace(_apiKey) ? "API key is required" : null;
+
+    public void ApplyConfig(IReadOnlyDictionary<string, string> values)
+    {
+        if (values.TryGetValue("apiKey", out var key))
+            _apiKey = key;
+    }
 
     public AisClient(string apiKey, double[][][] boundingBoxes)
     {

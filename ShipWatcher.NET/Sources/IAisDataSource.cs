@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 
-namespace ShipWatcher.NET;
+namespace ShipWatcher.NET.Sources;
 
 public interface IAisDataSource : IDisposable
 {

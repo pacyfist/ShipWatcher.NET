@@ -1,7 +1,7 @@
 using System.Text;
 using Serilog;
 
-namespace ShipWatcher.NET;
+namespace ShipWatcher.NET.Sources;
 
 /// <summary>
 /// Parses NMEA AIS sentences (!AIVDM/!AIVDO) and decodes 6-bit armored AIS payloads.

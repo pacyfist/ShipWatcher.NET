@@ -3,14 +3,14 @@ using System.Net.Sockets;
 using System.Text;
 using Serilog;
 
-namespace ShipWatcher.NET;
+namespace ShipWatcher.NET.Sources;
 
 /// <summary>
 /// AIS data source connecting to the Norwegian Coastal Administration (Kystverket)
 /// raw TCP NMEA stream at 153.44.253.27:5631.
 /// Provides open AIS data in IEC 62320-1 format (NMEA sentences).
 /// </summary>
-public class KystverketAisClient : IAisDataSource
+public class KystverketAisClient : IAisDataSource, ISourceDescriptor
 {
     private const string Host = "153.44.253.27";
     private const int Port = 5631;
@@ -28,6 +28,12 @@ public class KystverketAisClient : IAisDataSource
     public string SourceName => "Kystverket (Norway)";
 
     public event Action? OnDataUpdated;
+
+    // ISourceDescriptor
+    public string DisplayLabel => "Kystverket (Norway, open data)";
+    public IReadOnlyList<SourceConfigField> ConfigFields => [];
+    public string? ValidateConfig() => null;
+    public void ApplyConfig(IReadOnlyDictionary<string, string> values) { }
 
     public async Task ConnectAsync(CancellationToken ct = default)
     {

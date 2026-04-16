@@ -1,6 +1,8 @@
 using Terminal.Gui;
 
-namespace ShipWatcher.NET;
+using ShipWatcher.NET;
+
+namespace ShipWatcher.NET.Views;
 
 public class MapView : View
 {
