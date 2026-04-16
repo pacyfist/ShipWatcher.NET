@@ -3,13 +3,6 @@ using ShipWatcher.NET;
 
 // --- Configuration ---
 var apiKey = Environment.GetEnvironmentVariable("AISSTREAM_API_KEY") ?? "";
-if (string.IsNullOrWhiteSpace(apiKey))
-{
-    Console.Error.WriteLine("Set AISSTREAM_API_KEY environment variable to your aisstream.io API key.");
-    Console.Error.WriteLine("  export AISSTREAM_API_KEY=your_key_here");
-    Console.Error.WriteLine("Get a free key at https://aisstream.io");
-    return 1;
-}
 
 // Default: worldwide bounding box. Override with env vars if desired.
 var latMin = double.TryParse(Environment.GetEnvironmentVariable("SHIPWATCHER_LAT_MIN"), out var la1) ? la1 : -90.0;
@@ -20,7 +13,31 @@ var lonMax = double.TryParse(Environment.GetEnvironmentVariable("SHIPWATCHER_LON
 double[][][] bbox = [[[latMin, lonMin], [latMax, lonMax]]];
 
 using var cts = new CancellationTokenSource();
-using var client = new AisClient(apiKey, bbox);
+
+// --- Data source management ---
+// Source 0 = aisstream.io (requires API key), Source 1 = Kystverket (open, Norway only)
+int currentSourceIndex = 0;
+IAisDataSource? activeSource = null;
+
+IAisDataSource CreateSource(int index)
+{
+    return index switch
+    {
+        0 => new AisClient(apiKey, bbox),
+        1 => new KystverketAisClient(),
+        _ => throw new ArgumentOutOfRangeException()
+    };
+}
+
+string[] sourceNames = ["aisstream.io", "Kystverket (Norway)"];
+
+// Start with aisstream.io if API key is available, otherwise Kystverket
+if (string.IsNullOrWhiteSpace(apiKey))
+{
+    currentSourceIndex = 1;
+}
+
+activeSource = CreateSource(currentSourceIndex);
 
 Application.Init();
 
@@ -118,6 +135,69 @@ void ToggleView()
         vesselList.SetFocus();
 }
 
+// --- Switch data source via dialog ---
+void ShowSourceDialog()
+{
+    var dlg = new Dialog("Select Data Source", 60, 14);
+
+    var aisStreamLabel = "aisstream.io (global, requires API key)";
+    var kystverketLabel = "Kystverket (Norway, open data)";
+
+    var radioGroup = new RadioGroup([aisStreamLabel, kystverketLabel])
+    {
+        X = 1,
+        Y = 0,
+        SelectedItem = currentSourceIndex,
+    };
+
+    var apiKeyLabel = new Label("API Key:") { X = 1, Y = 3 };
+    var apiKeyField = new TextField(apiKey) { X = 11, Y = 3, Width = 44 };
+
+    radioGroup.SelectedItemChanged += (args) =>
+    {
+        apiKeyLabel.Visible = args.SelectedItem == 0;
+        apiKeyField.Visible = args.SelectedItem == 0;
+    };
+
+    apiKeyLabel.Visible = radioGroup.SelectedItem == 0;
+    apiKeyField.Visible = radioGroup.SelectedItem == 0;
+
+    var connect = new Button("Connect", true);
+    connect.Clicked += () =>
+    {
+        var selected = radioGroup.SelectedItem;
+        var enteredKey = apiKeyField.Text?.ToString()?.Trim() ?? "";
+
+        if (selected == 0 && string.IsNullOrWhiteSpace(enteredKey))
+        {
+            MessageBox.ErrorQuery("API Key Required", "Please enter an aisstream.io API key.", "OK");
+            return;
+        }
+
+        bool keyChanged = selected == 0 && enteredKey != apiKey;
+        if (selected == 0)
+            apiKey = enteredKey;
+
+        if (selected != currentSourceIndex || keyChanged)
+        {
+            activeSource?.Disconnect();
+            activeSource?.Dispose();
+            currentSourceIndex = selected;
+            activeSource = CreateSource(currentSourceIndex);
+            _ = Task.Run(async () => await activeSource.ConnectAsync(cts.Token));
+        }
+        Application.RequestStop();
+    };
+
+    var cancel = new Button("Cancel");
+    cancel.Clicked += () => Application.RequestStop();
+
+    dlg.Add(radioGroup, apiKeyLabel, apiKeyField);
+    dlg.AddButton(connect);
+    dlg.AddButton(cancel);
+    Application.Run(dlg);
+}
+
 // --- Status bar ---
 var statusBar = new StatusBar(new StatusItem[]
 {
@@ -125,6 +205,7 @@ var statusBar = new StatusBar(new StatusItem[]
     new (Key.Tab, "~Tab~ Map/Table", ToggleView),
     new (Key.R | Key.CtrlMask, "~Ctrl+R~ Reconnect", async () => await Reconnect()),
     new (Key.F, "~F~ Filter", ShowFilterDialog),
+    new (Key.S, "~S~ Source", ShowSourceDialog),
 });
 
 top.Add(win, statusBar);
@@ -160,21 +241,27 @@ var refreshTimer = Application.MainLoop.AddTimeout(TimeSpan.FromSeconds(2), (_) 
 // --- Status update timer ---
 var statusTimer = Application.MainLoop.AddTimeout(TimeSpan.FromSeconds(1), (_) =>
 {
-    var connected = client.IsConnected ? "CONNECTED" : "DISCONNECTED";
-    var err = client.LastError != null ? $" | Err: {client.LastError}" : "";
+    var src = activeSource;
+    if (src is null) return true;
+
+    var connected = src.IsConnected ? "CONNECTED" : "DISCONNECTED";
+    var err = src.LastError != null ? $" | Err: {src.LastError}" : "";
     var view = showMap ? "MAP" : "TABLE";
-    win.Title = $"ShipWatcher - {connected} | {view} | Vessels: {client.Vessels.Count} | Msgs: {client.MessageCount}{err}";
+    var sourceName = src.SourceName;
+    win.Title = $"ShipWatcher - {sourceName} - {connected} | {view} | Vessels: {src.Vessels.Count} | Msgs: {src.MessageCount}{err}";
     return true;
 });
 
 // --- Connect and run ---
 _ = Task.Run(async () =>
 {
-    await client.ConnectAsync(cts.Token);
+    await activeSource.ConnectAsync(cts.Token);
 });
 
 Application.Run();
 Application.Shutdown();
+
+activeSource?.Dispose();
 
 return 0;
 
@@ -182,7 +269,10 @@ return 0;
 
 void RefreshTable()
 {
-    var vessels = client.Vessels.Values
+    var src = activeSource;
+    if (src is null) return;
+
+    var vessels = src.Vessels.Values
         .Where(v => string.IsNullOrEmpty(nameFilter) ||
                      v.Name.Contains(nameFilter, StringComparison.OrdinalIgnoreCase) ||
                      v.MMSI.ToString().Contains(nameFilter))
@@ -212,7 +302,10 @@ void RefreshTable()
 
 void RefreshMap()
 {
-    var vessels = client.Vessels.Values
+    var src = activeSource;
+    if (src is null) return;
+
+    var vessels = src.Vessels.Values
         .Where(v => string.IsNullOrEmpty(nameFilter) ||
                      v.Name.Contains(nameFilter, StringComparison.OrdinalIgnoreCase) ||
                      v.MMSI.ToString().Contains(nameFilter))
@@ -290,7 +383,9 @@ void ShowFilterDialog()
 
 async Task Reconnect()
 {
-    client.Dispose();
-    using var newClient = new AisClient(apiKey, bbox);
-    await newClient.ConnectAsync(cts.Token);
+    var src = activeSource;
+    if (src is null) return;
+
+    src.Disconnect();
+    await Task.Run(async () => await src.ConnectAsync(cts.Token));
 }

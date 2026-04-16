@@ -6,7 +6,7 @@ using Serilog;
 
 namespace ShipWatcher.NET;
 
-public class AisClient : IDisposable
+public class AisClient : IAisDataSource
 {
     private readonly string _apiKey;
     private readonly double[][][] _boundingBoxes;
@@ -25,6 +25,7 @@ public class AisClient : IDisposable
     public int MessageCount { get; private set; }
     public bool IsConnected => _ws?.State == WebSocketState.Open;
     public string? LastError { get; private set; }
+    public string SourceName => "aisstream.io";
 
     public event Action? OnDataUpdated;
 
@@ -150,17 +151,24 @@ public class AisClient : IDisposable
         }
     }
 
-    public void Dispose()
+    public void Disconnect()
     {
         try
         {
             _cts?.Cancel();
             _ws?.Dispose();
             _cts?.Dispose();
+            _ws = null;
+            _cts = null;
         }
         catch (Exception ex)
         {
-            Log.Error(ex, "Dispose failed");
+            Log.Error(ex, "Disconnect failed");
         }
+    }
+
+    public void Dispose()
+    {
+        Disconnect();
     }
 }
