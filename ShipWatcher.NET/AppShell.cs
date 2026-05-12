@@ -97,6 +97,7 @@ public class AppShell(VesselStore vesselStore, IServiceProvider serviceProvider,
         {
             new(Key.Q | Key.CtrlMask, "~Ctrl+Q~ Quit", () => Application.RequestStop()),
             new(Key.Tab, "~Tab~ Cycle View", CycleView),
+            new(Key.C, "~C~ Clear", () => { vesselStore.Clear(); RefreshActiveView(); }),
             new(Key.R | Key.CtrlMask, "~Ctrl+R~ Reconnect", async () => await Reconnect()),
             new(Key.F, "~F~ Filter", ShowFilterDialog),
             new(Key.S, "~S~ Source", ShowSourceDialog),

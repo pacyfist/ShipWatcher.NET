@@ -21,4 +21,6 @@ public class VesselStore
     }
 
     public List<Vessel> GetAll() => Vessels.Values.ToList();
+
+    public void Clear() => Vessels.Clear();
 }
