@@ -14,6 +14,13 @@ A community-driven AIS sharing network.
 - **Model:** Contributors who host an AIS receiver get free access to the global feed.
 - **Website:** [aishub.net](https://www.aishub.net)
 
+### BarentsWatch (Nordic/Baltic)
+Operated by the Norwegian Coastal Administration, BarentsWatch is the primary data hub for the North Atlantic and Baltic regions.
+- **Coverage:** Norway, Sweden, Denmark, Iceland, and Estonia.
+- **API Tech:** REST / JSON Streaming (OAuth 2.0 required).
+- **Best For:** High-quality regional tracking and developer-friendly JSON feeds.
+- **Website:** [barentswatch.no](https://www.barentswatch.no) | [Developer Portal](https://developer.barentswatch.no)
+
 ### Kystverket (Norwegian Coastal Administration)
 Provides free AIS data for the Norwegian economic zone.
 - **Website:** [kystverket.no](https://www.kystverket.no/en/maritime-services/ais/)

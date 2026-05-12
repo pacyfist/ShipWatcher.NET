@@ -9,6 +9,11 @@ This document summarizes free and open-access sources for real-time and historic
 - **Best For:** Developers building live dashboards or alerts.
 - **Access:** [aisstream.io](https://aisstream.io)
 
+### BarentsWatch (Nordic/Baltic)
+- **Service:** High-quality JSON stream covering Norway, Sweden, Denmark, Iceland, and Estonia.
+- **Access:** Requires free registration at [barentswatch.no/minside](https://www.barentswatch.no/minside).
+- **API Tech:** OAuth 2.0 / JSON Stream.
+
 ### Kystverket (Norway)
 - **Service:** Raw AIS TCP stream for the Norwegian Economic Zone.
 - **Access:** `153.44.253.27:5631`

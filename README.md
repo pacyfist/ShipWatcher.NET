@@ -8,7 +8,8 @@ The system supports multiple AIS data sources:
 
 1.  **Kystverket (Norway)**: Free, open real-time TCP stream for the Norwegian Economic Zone. No registration required.
 2.  **Digitraffic (Finland)**: Free, open REST API for Finnish waters. No registration required.
-3.  **aisstream.io**: Global real-time WebSocket feed. **Requires a free API key** from [aisstream.io](https://aisstream.io).
+3.  **BarentsWatch (Nordic/Baltic)**: Free JSON stream for Norway, Sweden, Denmark, Iceland, and Estonia. Requires a free account.
+4.  **aisstream.io**: Global real-time WebSocket feed. **Requires a free API key** from [aisstream.io](https://aisstream.io).
 
 ## Configuration
 
