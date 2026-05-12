@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Terminal.Gui;
 using ShipWatcher.NET.Sources;
 using ShipWatcher.NET.Views;
@@ -6,9 +7,9 @@ namespace ShipWatcher.NET;
 
 public class AppShell
 {
-    private readonly List<Func<IAisDataSource>> _sourceFactories;
-    private readonly List<Func<IShipWatcherView>> _viewFactories;
+    private readonly IServiceProvider _serviceProvider;
     private List<IShipWatcherView> _views = [];
+    private List<IAisDataSource> _sources = [];
     private readonly CancellationTokenSource _cts = new();
 
     private IAisDataSource? _activeSource;
@@ -17,23 +18,22 @@ public class AppShell
     private string _nameFilter = "";
 
     public AppShell(
-        List<Func<IAisDataSource>> sourceFactories,
-        List<Func<IShipWatcherView>> viewFactories,
+        IServiceProvider serviceProvider,
         int defaultSourceIndex = 0)
     {
-        _sourceFactories = sourceFactories;
-        _viewFactories = viewFactories;
+        _serviceProvider = serviceProvider;
         _currentSourceIndex = defaultSourceIndex;
     }
 
     public void Run()
     {
-        _activeSource = _sourceFactories[_currentSourceIndex]();
+        _sources = _serviceProvider.GetServices<IAisDataSource>().ToList();
+        _activeSource = _sources[_currentSourceIndex];
 
         Application.Init();
 
         // Create views after Application.Init() so Application.Driver is available
-        _views = _viewFactories.Select(f => f()).ToList();
+        _views = _serviceProvider.GetServices<IShipWatcherView>().ToList();
 
         var top = Application.Top;
 
@@ -167,23 +167,8 @@ public class AppShell
 
     private void ShowSourceDialog()
     {
-        // Build source descriptors from factories (create temp instances to read metadata)
-        var descriptors = new List<ISourceDescriptor>();
-        var tempSources = new List<IAisDataSource>();
-
-        for (int i = 0; i < _sourceFactories.Count; i++)
-        {
-            if (i == _currentSourceIndex && _activeSource is ISourceDescriptor activeDesc)
-            {
-                descriptors.Add(activeDesc);
-            }
-            else
-            {
-                var temp = _sourceFactories[i]();
-                tempSources.Add(temp);
-                descriptors.Add((ISourceDescriptor)temp);
-            }
-        }
+        // Use the already resolved sources
+        var descriptors = _sources.OfType<ISourceDescriptor>().ToList();
 
         var labels = descriptors.Select(d => (NStack.ustring)d.DisplayLabel).ToArray();
 
@@ -264,7 +249,8 @@ public class AppShell
                 _activeSource?.Disconnect();
                 _activeSource?.Dispose();
                 _currentSourceIndex = selected;
-                _activeSource = _sourceFactories[_currentSourceIndex]();
+                _sources = _serviceProvider.GetServices<IAisDataSource>().ToList();
+        _activeSource = _sources[_currentSourceIndex];
 
                 // Apply config to the fresh instance
                 if (_activeSource is ISourceDescriptor newDesc)
@@ -277,7 +263,8 @@ public class AppShell
                 // Same source but config changed — reconnect
                 _activeSource?.Disconnect();
                 _activeSource?.Dispose();
-                _activeSource = _sourceFactories[_currentSourceIndex]();
+                _sources = _serviceProvider.GetServices<IAisDataSource>().ToList();
+        _activeSource = _sources[_currentSourceIndex];
 
                 if (_activeSource is ISourceDescriptor newDesc)
                     newDesc.ApplyConfig(configValues);
@@ -295,9 +282,7 @@ public class AppShell
         dlg.AddButton(cancel);
         Application.Run(dlg);
 
-        // Dispose temp instances
-        foreach (var temp in tempSources)
-            temp.Dispose();
+
     }
 
     private void ShowFilterDialog()
