@@ -19,6 +19,7 @@ public class MapShipView : IShipWatcherView
             Width = Dim.Fill(),
             Height = Dim.Fill() - 5,
             Visible = true,
+            CanFocus = true,
         };
     }
 
