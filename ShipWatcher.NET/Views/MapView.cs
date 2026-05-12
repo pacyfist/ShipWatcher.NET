@@ -10,7 +10,8 @@ public class MapView : View
     private double _centerLon = 0.0;
     private int _zoomLevel = 0;
 
-    private List<Vessel> _vessels = new();
+    private readonly VesselStore _store;
+    private string _filter = "";
 
     private static readonly double[] LatSpans = [180, 120, 80, 50, 30, 18, 10, 5, 3, 1.5];
 
@@ -19,8 +20,9 @@ public class MapView : View
 
     private const char UpperHalf = '\u2580'; // ▀
 
-    public MapView()
+    public MapView(VesselStore store)
     {
+        _store = store;
         CanFocus = true;
         _polygons = GetContinentPolygons();
         _bboxes = new (double, double, double, double)[_polygons.Length];
@@ -40,9 +42,9 @@ public class MapView : View
         }
     }
 
-    public void UpdateVessels(List<Vessel> vessels)
+    public void UpdateFilter(string filter)
     {
-        _vessels = vessels;
+        _filter = filter;
         SetNeedsDisplay();
     }
 
@@ -174,8 +176,13 @@ public class MapView : View
 
         // Draw ships
         int shipCount = 0;
-        foreach (var vessel in _vessels)
+        foreach (var vessel in _store.Vessels.Values)
         {
+            if (!string.IsNullOrEmpty(_filter) &&
+                !vessel.Name.Contains(_filter, StringComparison.OrdinalIgnoreCase) &&
+                !vessel.MMSI.ToString().Contains(_filter))
+                continue;
+
             double vlon = vessel.Longitude;
             double relLon = vlon - lonMin;
             relLon = ((relLon % 360) + 360) % 360;
@@ -707,7 +714,7 @@ public class MapView : View
              (-47.8, -66.2), (-47.9, -65.8), (-49.0, -67.5), (-50.0, -67.9), (-50.0, -69.0), 
              (-50.2, -68.4), (-51.6, -69.5), (-52.3, -68.4), (-52.8, -70.8), (-53.9, -71.3), 
              (-53.4, -72.4), (-52.8, -71.2), (-53.2, -73.1), (-52.6, -71.5), (-52.5, -72.7), 
-             (-53.1, -73.1), (-52.8, -73.6), (-52.5, -73.1), (-52.6, -74.0), (-52.1, -74.3), 
+             ( -53.1, -73.1), (-52.8, -73.6), (-52.5, -73.1), (-52.6, -74.0), (-52.1, -74.3), 
              (-52.3, -72.5), (-51.7, -72.5), (-51.5, -73.2), (-51.8, -72.6), (-52.0, -73.5), 
              (-50.7, -75.1), (-50.4, -74.6), (-50.9, -73.8), (-50.5, -73.7), (-50.8, -74.0), 
              (-50.2, -74.6), (-49.6, -73.8), (-48.0, -74.6), (-48.1, -73.4), (-47.7, -74.7), 

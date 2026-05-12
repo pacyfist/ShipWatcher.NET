@@ -7,6 +7,7 @@ namespace ShipWatcher.NET;
 
 public class AppShell
 {
+    private readonly VesselStore _vesselStore;
     private readonly IServiceProvider _serviceProvider;
     private List<IShipWatcherView> _views = [];
     private List<IAisDataSource> _sources = [];
@@ -18,9 +19,11 @@ public class AppShell
     private string _nameFilter = "";
 
     public AppShell(
+        VesselStore vesselStore,
         IServiceProvider serviceProvider,
         int defaultSourceIndex = 0)
     {
+        _vesselStore = vesselStore;
         _serviceProvider = serviceProvider;
         _currentSourceIndex = defaultSourceIndex;
     }
@@ -129,7 +132,7 @@ public class AppShell
             var err = src.LastError != null ? $" | Err: {src.LastError}" : "";
             var viewName = _views[_activeViewIndex].ViewName;
             var sourceName = src.SourceName;
-            win.Title = $"ShipWatcher - {sourceName} - {connected} | {viewName} | Vessels: {src.Vessels.Count} | Msgs: {src.MessageCount}{err}";
+            win.Title = $"ShipWatcher - {sourceName} - {connected} | {viewName} | Total Vessels: {_vesselStore.Vessels.Count} | Msgs: {src.MessageCount}{err}";
             return true;
         });
 
@@ -148,28 +151,19 @@ public class AppShell
         _activeViewIndex = (_activeViewIndex + 1) % _views.Count;
         _views[_activeViewIndex].Activate();
         _views[_activeViewIndex].SetViewFocus();
+        RefreshActiveView();
     }
 
     private void RefreshActiveView()
     {
-        var src = _activeSource;
-        if (src is null) return;
-
-        var vessels = src.Vessels.Values
-            .Where(v => string.IsNullOrEmpty(_nameFilter) ||
-                         v.Name.Contains(_nameFilter, StringComparison.OrdinalIgnoreCase) ||
-                         v.MMSI.ToString().Contains(_nameFilter))
-            .OrderBy(v => v.MMSI)
-            .ToList();
-
-        _views[_activeViewIndex].RefreshData(vessels);
+        _views[_activeViewIndex].Refresh(_nameFilter);
     }
 
     private void ShowSourceDialog()
     {
         // Use the already resolved sources
         var descriptors = _sources.OfType<ISourceDescriptor>().ToList();
-
+        
         var labels = descriptors.Select(d => (NStack.ustring)d.DisplayLabel).ToArray();
 
         // Calculate dialog height based on max config fields
@@ -247,29 +241,21 @@ public class AppShell
             if (selected != _currentSourceIndex)
             {
                 _activeSource?.Disconnect();
-                _activeSource?.Dispose();
                 _currentSourceIndex = selected;
-                _sources = _serviceProvider.GetServices<IAisDataSource>().ToList();
-        _activeSource = _sources[_currentSourceIndex];
-
-                // Apply config to the fresh instance
-                if (_activeSource is ISourceDescriptor newDesc)
-                    newDesc.ApplyConfig(configValues);
-
-                _ = Task.Run(async () => await _activeSource.ConnectAsync(_cts.Token));
+                _activeSource = _sources[_currentSourceIndex];
+                if (_activeSource != null)
+                {
+                    _ = Task.Run(async () => await _activeSource.ConnectAsync(_cts.Token));
+                }
             }
             else if (configValues.Count > 0)
             {
                 // Same source but config changed — reconnect
                 _activeSource?.Disconnect();
-                _activeSource?.Dispose();
-                _sources = _serviceProvider.GetServices<IAisDataSource>().ToList();
-        _activeSource = _sources[_currentSourceIndex];
-
-                if (_activeSource is ISourceDescriptor newDesc)
-                    newDesc.ApplyConfig(configValues);
-
-                _ = Task.Run(async () => await _activeSource.ConnectAsync(_cts.Token));
+                if (_activeSource != null)
+                {
+                    _ = Task.Run(async () => await _activeSource.ConnectAsync(_cts.Token));
+                }
             }
 
             Application.RequestStop();
@@ -281,8 +267,6 @@ public class AppShell
         dlg.AddButton(connect);
         dlg.AddButton(cancel);
         Application.Run(dlg);
-
-
     }
 
     private void ShowFilterDialog()

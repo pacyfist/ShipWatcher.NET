@@ -20,8 +20,8 @@ public interface IShipWatcherView
     /// <summary>Hide this view's elements.</summary>
     void Deactivate();
 
-    /// <summary>Called on the refresh timer with the current filtered vessel list.</summary>
-    void RefreshData(IReadOnlyList<Vessel> vessels);
+    /// <summary>Called on the refresh timer. Views should pull from VesselStore and apply filter.</summary>
+    void Refresh(string filter);
 
     /// <summary>Set focus to this view's primary interactive element.</summary>
     void SetViewFocus();

@@ -10,9 +10,9 @@ public class MapShipView : IShipWatcherView
 
     public event Action<Vessel?>? VesselSelected;
 
-    public MapShipView()
+    public MapShipView(VesselStore store)
     {
-        _mapView = new MapView
+        _mapView = new MapView(store)
         {
             X = 0,
             Y = 0,
@@ -28,9 +28,9 @@ public class MapShipView : IShipWatcherView
 
     public void Deactivate() => _mapView.Visible = false;
 
-    public void RefreshData(IReadOnlyList<Vessel> vessels)
+    public void Refresh(string filter)
     {
-        _mapView.UpdateVessels(vessels.ToList());
+        _mapView.UpdateFilter(filter);
     }
 
     public void SetViewFocus() => _mapView.SetFocus();

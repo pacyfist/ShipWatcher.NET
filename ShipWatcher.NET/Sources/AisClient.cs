@@ -8,6 +8,7 @@ namespace ShipWatcher.NET.Sources;
 
 public class AisClient : IAisDataSource, ISourceDescriptor
 {
+    private readonly VesselStore _store;
     private string _apiKey;
     private double[][][] _boundingBoxes;
     private ClientWebSocket? _ws;
@@ -21,7 +22,6 @@ public class AisClient : IAisDataSource, ISourceDescriptor
             outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
         .CreateLogger();
 
-    public ConcurrentDictionary<long, Vessel> Vessels { get; } = new();
     public int MessageCount { get; private set; }
     public bool IsConnected => _ws?.State == WebSocketState.Open;
     public string? LastError { get; private set; }
@@ -46,8 +46,9 @@ public class AisClient : IAisDataSource, ISourceDescriptor
             _apiKey = key;
     }
 
-    public AisClient(string apiKey, double[][][] boundingBoxes)
+    public AisClient(VesselStore store, string apiKey, double[][][] boundingBoxes)
     {
+        _store = store;
         _apiKey = apiKey;
         _boundingBoxes = boundingBoxes;
     }
@@ -129,35 +130,37 @@ public class AisClient : IAisDataSource, ISourceDescriptor
 
             MessageCount++;
             var meta = envelope.MetaData;
-            var vessel = Vessels.GetOrAdd(meta.MMSI, _ => new Vessel { MMSI = meta.MMSI });
 
-            if (!string.IsNullOrWhiteSpace(meta.ShipName))
-                vessel.Name = meta.ShipName.Trim();
-
-            vessel.Latitude = meta.Latitude;
-            vessel.Longitude = meta.Longitude;
-            vessel.LastUpdate = meta.TimeUtc;
-
-            switch (envelope.MessageType)
+            _store.Upsert(meta.MMSI, vessel =>
             {
-                case "PositionReport" when envelope.Message.PositionReport is { } pr:
-                    vessel.Speed = pr.Sog;
-                    vessel.Course = pr.Cog;
-                    vessel.Heading = pr.TrueHeading;
-                    vessel.NavStatus = pr.NavigationalStatus;
-                    break;
+                if (!string.IsNullOrWhiteSpace(meta.ShipName))
+                    vessel.Name = meta.ShipName.Trim();
 
-                case "ShipStaticData" when envelope.Message.ShipStaticData is { } sd:
-                    vessel.Destination = sd.Destination?.Trim() ?? "";
-                    vessel.CallSign = sd.CallSign?.Trim() ?? "";
-                    break;
+                vessel.Latitude = meta.Latitude;
+                vessel.Longitude = meta.Longitude;
+                vessel.LastUpdate = meta.TimeUtc;
 
-                case "StandardClassBPositionReport" when envelope.Message.StandardClassBPositionReport is { } cb:
-                    vessel.Speed = cb.Sog;
-                    vessel.Course = cb.Cog;
-                    vessel.Heading = cb.TrueHeading;
-                    break;
-            }
+                switch (envelope.MessageType)
+                {
+                    case "PositionReport" when envelope.Message.PositionReport is { } pr:
+                        vessel.Speed = pr.Sog;
+                        vessel.Course = pr.Cog;
+                        vessel.Heading = pr.TrueHeading;
+                        vessel.NavStatus = pr.NavigationalStatus;
+                        break;
+
+                    case "ShipStaticData" when envelope.Message.ShipStaticData is { } sd:
+                        vessel.Destination = sd.Destination?.Trim() ?? "";
+                        vessel.CallSign = sd.CallSign?.Trim() ?? "";
+                        break;
+
+                    case "StandardClassBPositionReport" when envelope.Message.StandardClassBPositionReport is { } cb:
+                        vessel.Speed = cb.Sog;
+                        vessel.Course = cb.Cog;
+                        vessel.Heading = cb.TrueHeading;
+                        break;
+                }
+            });
 
             OnDataUpdated?.Invoke();
         }

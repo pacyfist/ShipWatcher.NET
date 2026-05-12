@@ -4,7 +4,6 @@ namespace ShipWatcher.NET.Sources;
 
 public interface IAisDataSource : IDisposable
 {
-    ConcurrentDictionary<long, Vessel> Vessels { get; }
     int MessageCount { get; }
     bool IsConnected { get; }
     string? LastError { get; }

@@ -15,13 +15,13 @@ public class KystverketAisClient : IAisDataSource, ISourceDescriptor
     private const string Host = "153.44.253.27";
     private const int Port = 5631;
 
+    private readonly VesselStore _store;
     private TcpClient? _tcp;
     private CancellationTokenSource? _cts;
     private readonly NmeaParser _parser = new();
 
     private static readonly ILogger Log = Serilog.Log.ForContext<KystverketAisClient>();
 
-    public ConcurrentDictionary<long, Vessel> Vessels { get; } = new();
     public int MessageCount { get; private set; }
     public bool IsConnected => _tcp?.Connected == true;
     public string? LastError { get; private set; }
@@ -34,6 +34,11 @@ public class KystverketAisClient : IAisDataSource, ISourceDescriptor
     public IReadOnlyList<SourceConfigField> ConfigFields => [];
     public string? ValidateConfig() => null;
     public void ApplyConfig(IReadOnlyDictionary<string, string> values) { }
+
+    public KystverketAisClient(VesselStore store)
+    {
+        _store = store;
+    }
 
     public async Task ConnectAsync(CancellationToken ct = default)
     {
@@ -107,39 +112,40 @@ public class KystverketAisClient : IAisDataSource, ISourceDescriptor
                 return;
 
             MessageCount++;
-            var vessel = Vessels.GetOrAdd(result.MMSI, _ => new Vessel { MMSI = result.MMSI });
-
-            switch (result.MessageType)
+            _store.Upsert(result.MMSI, vessel =>
             {
-                case NmeaMessageType.PositionReport:
-                    vessel.Latitude = result.Latitude;
-                    vessel.Longitude = result.Longitude;
-                    vessel.Speed = result.Sog;
-                    vessel.Course = result.Cog;
-                    vessel.Heading = result.TrueHeading;
-                    vessel.NavStatus = result.NavigationalStatus;
-                    vessel.LastUpdate = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
-                    break;
+                switch (result.MessageType)
+                {
+                    case NmeaMessageType.PositionReport:
+                        vessel.Latitude = result.Latitude;
+                        vessel.Longitude = result.Longitude;
+                        vessel.Speed = result.Sog;
+                        vessel.Course = result.Cog;
+                        vessel.Heading = result.TrueHeading;
+                        vessel.NavStatus = result.NavigationalStatus;
+                        vessel.LastUpdate = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
+                        break;
 
-                case NmeaMessageType.StaticData:
-                    if (!string.IsNullOrWhiteSpace(result.Name))
-                        vessel.Name = result.Name;
-                    if (!string.IsNullOrWhiteSpace(result.CallSign))
-                        vessel.CallSign = result.CallSign;
-                    if (!string.IsNullOrWhiteSpace(result.Destination))
-                        vessel.Destination = result.Destination;
-                    vessel.LastUpdate = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
-                    break;
+                    case NmeaMessageType.StaticData:
+                        if (!string.IsNullOrWhiteSpace(result.Name))
+                            vessel.Name = result.Name;
+                        if (!string.IsNullOrWhiteSpace(result.CallSign))
+                            vessel.CallSign = result.CallSign;
+                        if (!string.IsNullOrWhiteSpace(result.Destination))
+                            vessel.Destination = result.Destination;
+                        vessel.LastUpdate = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
+                        break;
 
-                case NmeaMessageType.ClassBPositionReport:
-                    vessel.Latitude = result.Latitude;
-                    vessel.Longitude = result.Longitude;
-                    vessel.Speed = result.Sog;
-                    vessel.Course = result.Cog;
-                    vessel.Heading = result.TrueHeading;
-                    vessel.LastUpdate = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
-                    break;
-            }
+                    case NmeaMessageType.ClassBPositionReport:
+                        vessel.Latitude = result.Latitude;
+                        vessel.Longitude = result.Longitude;
+                        vessel.Speed = result.Sog;
+                        vessel.Course = result.Cog;
+                        vessel.Heading = result.TrueHeading;
+                        vessel.LastUpdate = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
+                        break;
+                }
+            });
 
             OnDataUpdated?.Invoke();
         }

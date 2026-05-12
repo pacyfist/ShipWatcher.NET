@@ -4,6 +4,7 @@ namespace ShipWatcher.NET.Views;
 
 public class TableShipView : IShipWatcherView
 {
+    private readonly VesselStore _store;
     private readonly Label _headerLabel;
     private readonly ListView _vesselList;
     private List<Vessel> _sortedVessels = [];
@@ -13,8 +14,9 @@ public class TableShipView : IShipWatcherView
 
     public event Action<Vessel?>? VesselSelected;
 
-    public TableShipView()
+    public TableShipView(VesselStore store)
     {
+        _store = store;
         _headerLabel = new Label(FormatRow("MMSI", "Name", "Position", "SOG", "COG", "HDG", "Status", "Destination"))
         {
             X = 0,
@@ -75,9 +77,15 @@ public class TableShipView : IShipWatcherView
         _vesselList.Visible = false;
     }
 
-    public void RefreshData(IReadOnlyList<Vessel> vessels)
+    public void Refresh(string filter)
     {
-        _sortedVessels = vessels.ToList();
+        _sortedVessels = _store.Vessels.Values
+            .Where(v => string.IsNullOrEmpty(filter) ||
+                         v.Name.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
+                         v.MMSI.ToString().Contains(filter))
+            .OrderBy(v => v.MMSI)
+            .ToList();
+
         _vesselRows = _sortedVessels
             .Select(v => FormatRow(
                 v.MMSI.ToString(),
