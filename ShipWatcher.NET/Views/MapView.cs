@@ -4,31 +4,27 @@ using ShipWatcher.NET;
 
 namespace ShipWatcher.NET.Views;
 
-public class MapView : View
+public class MapView(VesselStore store) : View
 {
     private double _centerLat = 20.0;
     private double _centerLon = 0.0;
     private int _zoomLevel = 0;
 
-    private readonly VesselStore _store;
     private string _filter = "";
 
     private static readonly double[] LatSpans = [180, 120, 80, 50, 30, 18, 10, 5, 3, 1.5];
 
-    private readonly (double lat, double lon)[][] _polygons;
-    private readonly (double minLat, double maxLat, double minLon, double maxLon)[] _bboxes;
+    private readonly (double lat, double lon)[][] _polygons = GetContinentPolygons();
+    private readonly (double minLat, double maxLat, double minLon, double maxLon)[] _bboxes = CalculateBBoxes(GetContinentPolygons());
 
     private const char UpperHalf = '\u2580'; // ▀
 
-    public MapView(VesselStore store)
+    private static (double minLat, double maxLat, double minLon, double maxLon)[] CalculateBBoxes((double lat, double lon)[][] polygons)
     {
-        _store = store;
-        CanFocus = true;
-        _polygons = GetContinentPolygons();
-        _bboxes = new (double, double, double, double)[_polygons.Length];
-        for (int i = 0; i < _polygons.Length; i++)
+        var bboxes = new (double, double, double, double)[polygons.Length];
+        for (int i = 0; i < polygons.Length; i++)
         {
-            var poly = _polygons[i];
+            var poly = polygons[i];
             double minLat = double.MaxValue, maxLat = double.MinValue;
             double minLon = double.MaxValue, maxLon = double.MinValue;
             foreach (var (lat, lon) in poly)
@@ -38,8 +34,9 @@ public class MapView : View
                 if (lon < minLon) minLon = lon;
                 if (lon > maxLon) maxLon = lon;
             }
-            _bboxes[i] = (minLat, maxLat, minLon, maxLon);
+            bboxes[i] = (minLat, maxLat, minLon, maxLon);
         }
+        return bboxes;
     }
 
     public void UpdateFilter(string filter)
@@ -176,7 +173,7 @@ public class MapView : View
 
         // Draw ships
         int shipCount = 0;
-        foreach (var vessel in _store.Vessels.Values)
+        foreach (var vessel in store.Vessels.Values)
         {
             if (!string.IsNullOrEmpty(_filter) &&
                 !vessel.Name.Contains(_filter, StringComparison.OrdinalIgnoreCase) &&

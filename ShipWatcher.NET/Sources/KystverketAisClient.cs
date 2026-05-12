@@ -10,12 +10,11 @@ namespace ShipWatcher.NET.Sources;
 /// raw TCP NMEA stream at 153.44.253.27:5631.
 /// Provides open AIS data in IEC 62320-1 format (NMEA sentences).
 /// </summary>
-public class KystverketAisClient : IAisDataSource, ISourceDescriptor
+public class KystverketAisClient(VesselStore store) : IAisDataSource, ISourceDescriptor
 {
     private const string Host = "153.44.253.27";
     private const int Port = 5631;
 
-    private readonly VesselStore _store;
     private TcpClient? _tcp;
     private CancellationTokenSource? _cts;
     private readonly NmeaParser _parser = new();
@@ -34,11 +33,6 @@ public class KystverketAisClient : IAisDataSource, ISourceDescriptor
     public IReadOnlyList<SourceConfigField> ConfigFields => [];
     public string? ValidateConfig() => null;
     public void ApplyConfig(IReadOnlyDictionary<string, string> values) { }
-
-    public KystverketAisClient(VesselStore store)
-    {
-        _store = store;
-    }
 
     public async Task ConnectAsync(CancellationToken ct = default)
     {
@@ -112,7 +106,7 @@ public class KystverketAisClient : IAisDataSource, ISourceDescriptor
                 return;
 
             MessageCount++;
-            _store.Upsert(result.MMSI, vessel =>
+            store.Upsert(result.MMSI, vessel =>
             {
                 switch (result.MessageType)
                 {

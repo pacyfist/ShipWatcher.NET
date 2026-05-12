@@ -2,26 +2,21 @@ using Terminal.Gui;
 
 namespace ShipWatcher.NET.Views;
 
-public class MapShipView : IShipWatcherView
+public class MapShipView(VesselStore store) : IShipWatcherView
 {
-    private readonly MapView _mapView;
+    private readonly MapView _mapView = new(store)
+    {
+        X = 0,
+        Y = 0,
+        Width = Dim.Fill(),
+        Height = Dim.Fill() - 5,
+        Visible = true,
+        CanFocus = true,
+    };
 
     public string ViewName => "MAP";
 
     public event Action<Vessel?>? VesselSelected;
-
-    public MapShipView(VesselStore store)
-    {
-        _mapView = new MapView(store)
-        {
-            X = 0,
-            Y = 0,
-            Width = Dim.Fill(),
-            Height = Dim.Fill() - 5,
-            Visible = true,
-            CanFocus = true,
-        };
-    }
 
     public IEnumerable<View> GetViews() => [_mapView];
 

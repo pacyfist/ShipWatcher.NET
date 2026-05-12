@@ -5,38 +5,26 @@ using ShipWatcher.NET.Views;
 
 namespace ShipWatcher.NET;
 
-public class AppShell
+public class AppShell(VesselStore vesselStore, IServiceProvider serviceProvider, int defaultSourceIndex = 0)
 {
-    private readonly VesselStore _vesselStore;
-    private readonly IServiceProvider _serviceProvider;
     private List<IShipWatcherView> _views = [];
     private List<IAisDataSource> _sources = [];
     private readonly CancellationTokenSource _cts = new();
 
     private IAisDataSource? _activeSource;
-    private int _currentSourceIndex;
+    private int _currentSourceIndex = defaultSourceIndex;
     private int _activeViewIndex;
     private string _nameFilter = "";
 
-    public AppShell(
-        VesselStore vesselStore,
-        IServiceProvider serviceProvider,
-        int defaultSourceIndex = 0)
-    {
-        _vesselStore = vesselStore;
-        _serviceProvider = serviceProvider;
-        _currentSourceIndex = defaultSourceIndex;
-    }
-
     public void Run()
     {
-        _sources = _serviceProvider.GetServices<IAisDataSource>().ToList();
+        _sources = serviceProvider.GetServices<IAisDataSource>().ToList();
         _activeSource = _sources[_currentSourceIndex];
 
         Application.Init();
 
         // Create views after Application.Init() so Application.Driver is available
-        _views = _serviceProvider.GetServices<IShipWatcherView>().ToList();
+        _views = serviceProvider.GetServices<IShipWatcherView>().ToList();
 
         var top = Application.Top;
 
@@ -132,7 +120,7 @@ public class AppShell
             var err = src.LastError != null ? $" | Err: {src.LastError}" : "";
             var viewName = _views[_activeViewIndex].ViewName;
             var sourceName = src.SourceName;
-            win.Title = $"ShipWatcher - {sourceName} - {connected} | {viewName} | Total Vessels: {_vesselStore.Vessels.Count} | Msgs: {src.MessageCount}{err}";
+            win.Title = $"ShipWatcher - {sourceName} - {connected} | {viewName} | Total Vessels: {vesselStore.Vessels.Count} | Msgs: {src.MessageCount}{err}";
             return true;
         });
 

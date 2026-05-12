@@ -6,11 +6,10 @@ using Serilog;
 
 namespace ShipWatcher.NET.Sources;
 
-public class AisClient : IAisDataSource, ISourceDescriptor
+public class AisClient(VesselStore store, string apiKey, double[][][] boundingBoxes) : IAisDataSource, ISourceDescriptor
 {
-    private readonly VesselStore _store;
-    private string _apiKey;
-    private double[][][] _boundingBoxes;
+    private string _apiKey = apiKey;
+    private double[][][] _boundingBoxes = boundingBoxes;
     private ClientWebSocket? _ws;
     private CancellationTokenSource? _cts;
     private static readonly ILogger Log = new LoggerConfiguration()
@@ -44,13 +43,6 @@ public class AisClient : IAisDataSource, ISourceDescriptor
     {
         if (values.TryGetValue("apiKey", out var key))
             _apiKey = key;
-    }
-
-    public AisClient(VesselStore store, string apiKey, double[][][] boundingBoxes)
-    {
-        _store = store;
-        _apiKey = apiKey;
-        _boundingBoxes = boundingBoxes;
     }
 
     public async Task ConnectAsync(CancellationToken ct = default)
@@ -131,7 +123,7 @@ public class AisClient : IAisDataSource, ISourceDescriptor
             MessageCount++;
             var meta = envelope.MetaData;
 
-            _store.Upsert(meta.MMSI, vessel =>
+            store.Upsert(meta.MMSI, vessel =>
             {
                 if (!string.IsNullOrWhiteSpace(meta.ShipName))
                     vessel.Name = meta.ShipName.Trim();

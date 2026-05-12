@@ -17,6 +17,7 @@ public class TableShipView : IShipWatcherView
     public TableShipView(VesselStore store)
     {
         _store = store;
+
         _headerLabel = new Label(FormatRow("MMSI", "Name", "Position", "SOG", "COG", "HDG", "Status", "Destination"))
         {
             X = 0,
@@ -62,6 +63,8 @@ public class TableShipView : IShipWatcherView
                 ShowVesselDetail(_sortedVessels[idx]);
         };
     }
+
+
 
     public IEnumerable<View> GetViews() => [_headerLabel, _vesselList];
 
