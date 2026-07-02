@@ -27,6 +27,12 @@ public class MapView(VesselStore store) : View
     private readonly (double lat, double lon)[][] _polygons = GetContinentPolygons();
     private readonly (double minLat, double maxLat, double minLon, double maxLon)[] _bboxes = CalculateBBoxes(GetContinentPolygons());
 
+    // Land/water/grid rendering is expensive (point-in-polygon per half-cell),
+    // so the terrain layer is cached and only recomputed on pan/zoom/resize.
+    private (double lat, double lon, int zoom, int w, int h) _terrainKey;
+    private char[,]? _terrainChars;
+    private Terminal.Gui.Attribute[,]? _terrainAttrs;
+
     private const char UpperHalf = '\u2580'; // ▀
 
     private static (double minLat, double maxLat, double minLon, double maxLon)[] CalculateBBoxes((double lat, double lon)[][] polygons)
@@ -145,6 +151,75 @@ public class MapView(VesselStore store) : View
         double lonMin = _centerLon - lonSpan / 2;
         double lonMax = _centerLon + lonSpan / 2;
 
+        var shipAttr = Application.Driver.MakeAttribute(Color.BrightYellow, Color.Red);
+        var infoAttr = Application.Driver.MakeAttribute(Color.White, Color.Black);
+
+        var key = (_centerLat, _centerLon, _zoomLevel, w, h);
+        if (_terrainChars is null || _terrainAttrs is null || key != _terrainKey)
+        {
+            RenderTerrain(w, h, latMax, lonMin, latSpan, lonSpan);
+            _terrainKey = key;
+        }
+
+        for (int row = 0; row < h; row++)
+        {
+            for (int col = 0; col < w; col++)
+            {
+                Driver.SetAttribute(_terrainAttrs![row, col]);
+                Move(col, row);
+                Driver.AddRune((System.Rune)_terrainChars![row, col]);
+            }
+        }
+
+        // Draw ships
+        _visibleVessels.Clear();
+        foreach (var vessel in store.Vessels.Values)
+        {
+            if (!string.IsNullOrEmpty(_filter) &&
+                !vessel.Name.Contains(_filter, StringComparison.OrdinalIgnoreCase) &&
+                !vessel.MMSI.ToString().Contains(_filter))
+                continue;
+
+            double vlon = vessel.Longitude;
+            double relLon = vlon - lonMin;
+            relLon = ((relLon % 360) + 360) % 360;
+            if (relLon > 360) relLon -= 360;
+
+            int col = (int)(relLon / lonSpan * w);
+            int row = (int)((latMax - vessel.Latitude) / latSpan * h);
+
+            if (col >= 0 && col < w && row >= 0 && row < h)
+            {
+                _visibleVessels.Add((vessel, col, row));
+                Driver.SetAttribute(shipAttr);
+                Move(col, row);
+                Driver.AddRune((System.Rune)VesselMarker(vessel));
+            }
+        }
+
+        DrawSelectionHighlight(w);
+
+        // Info bar
+        Driver.SetAttribute(infoAttr);
+        string info = $" Zoom {_zoomLevel + 1}/{LatSpans.Length} | {latSpan:F1}\u00b0 | {_visibleVessels.Count} ships | +/- zoom | arrows pan | n/p select ";
+        int infoX = Math.Max(0, w - info.Length);
+        Move(infoX, 0);
+        foreach (char c in info)
+            Driver.AddRune((System.Rune)c);
+
+        // Coordinate label
+        string coords = $" {Math.Abs(_centerLat):F1}\u00b0{(_centerLat >= 0 ? "N" : "S")} {Math.Abs(_centerLon):F1}\u00b0{(_centerLon >= 0 ? "E" : "W")} ";
+        Driver.SetAttribute(infoAttr);
+        Move(0, h - 1);
+        foreach (char c in coords)
+            Driver.AddRune((System.Rune)c);
+    }
+
+    private void RenderTerrain(int w, int h, double latMax, double lonMin, double latSpan, double lonSpan)
+    {
+        _terrainChars = new char[h, w];
+        _terrainAttrs = new Terminal.Gui.Attribute[h, w];
+
         // Half-block rendering: each terminal row = 2 map rows
         int mapH = h * 2;
 
@@ -154,8 +229,6 @@ public class MapView(VesselStore store) : View
         var waterLand = Application.Driver.MakeAttribute(Color.Blue, Color.Green);
         var gridWaterAttr = Application.Driver.MakeAttribute(Color.DarkGray, Color.Blue);
         var gridLandAttr = Application.Driver.MakeAttribute(Color.DarkGray, Color.Green);
-        var shipAttr = Application.Driver.MakeAttribute(Color.BrightYellow, Color.Red);
-        var infoAttr = Application.Driver.MakeAttribute(Color.White, Color.Black);
 
         double gridSpacing = latSpan switch
         {
@@ -186,70 +259,39 @@ public class MapView(VesselStore store) : View
                 bool topGrid = IsGridLine(topLat, wlon, gridSpacing, latPerSubRow, lonPerCol);
                 bool botGrid = IsGridLine(botLat, wlon, gridSpacing, latPerSubRow, lonPerCol);
 
-                Move(col, row);
-
                 if (topGrid || botGrid)
                 {
-                    var bgColor = topLand ? Color.Green : Color.Blue;
-                    Driver.SetAttribute(Application.Driver.MakeAttribute(Color.DarkGray, bgColor));
-                    Driver.AddRune((System.Rune)'+');
+                    _terrainChars[row, col] = '+';
+                    _terrainAttrs[row, col] = topLand ? gridLandAttr : gridWaterAttr;
                 }
                 else if (topLand == botLand)
                 {
-                    Driver.SetAttribute(topLand ? landLand : waterWater);
-                    Driver.AddRune((System.Rune)' ');
+                    _terrainChars[row, col] = ' ';
+                    _terrainAttrs[row, col] = topLand ? landLand : waterWater;
                 }
                 else
                 {
-                    Driver.SetAttribute(topLand ? landWater : waterLand);
-                    Driver.AddRune((System.Rune)UpperHalf);
+                    _terrainChars[row, col] = UpperHalf;
+                    _terrainAttrs[row, col] = topLand ? landWater : waterLand;
                 }
             }
         }
-
-        // Draw ships
-        _visibleVessels.Clear();
-        foreach (var vessel in store.Vessels.Values)
-        {
-            if (!string.IsNullOrEmpty(_filter) &&
-                !vessel.Name.Contains(_filter, StringComparison.OrdinalIgnoreCase) &&
-                !vessel.MMSI.ToString().Contains(_filter))
-                continue;
-
-            double vlon = vessel.Longitude;
-            double relLon = vlon - lonMin;
-            relLon = ((relLon % 360) + 360) % 360;
-            if (relLon > 360) relLon -= 360;
-
-            int col = (int)(relLon / lonSpan * w);
-            int row = (int)((latMax - vessel.Latitude) / latSpan * h);
-
-            if (col >= 0 && col < w && row >= 0 && row < h)
-            {
-                _visibleVessels.Add((vessel, col, row));
-                Driver.SetAttribute(shipAttr);
-                Move(col, row);
-                Driver.AddRune((System.Rune)'*');
-            }
-        }
-
-        DrawSelectionHighlight(w);
-
-        // Info bar
-        Driver.SetAttribute(infoAttr);
-        string info = $" Zoom {_zoomLevel + 1}/{LatSpans.Length} | {latSpan:F1}\u00b0 | {_visibleVessels.Count} ships | +/- zoom | arrows pan | n/p select ";
-        int infoX = Math.Max(0, w - info.Length);
-        Move(infoX, 0);
-        foreach (char c in info)
-            Driver.AddRune((System.Rune)c);
-
-        // Coordinate label
-        string coords = $" {Math.Abs(_centerLat):F1}\u00b0{(_centerLat >= 0 ? "N" : "S")} {Math.Abs(_centerLon):F1}\u00b0{(_centerLon >= 0 ? "E" : "W")} ";
-        Driver.SetAttribute(infoAttr);
-        Move(0, h - 1);
-        foreach (char c in coords)
-            Driver.AddRune((System.Rune)c);
     }
+
+    /// <summary>Marker for a vessel: an 8-direction course arrow when under way, '*' otherwise.</summary>
+    private static char VesselMarker(Vessel v) =>
+        v.Speed <= 0.5 ? '*' : ((int)Math.Round(v.Course / 45.0) % 8) switch
+        {
+            0 => '↑',
+            1 => '↗',
+            2 => '→',
+            3 => '↘',
+            4 => '↓',
+            5 => '↙',
+            6 => '←',
+            7 => '↖',
+            _ => '*'
+        };
 
     private void DrawSelectionHighlight(int w)
     {
@@ -265,7 +307,7 @@ public class MapView(VesselStore store) : View
         var selectedAttr = Application.Driver.MakeAttribute(Color.Black, Color.BrightYellow);
         Driver.SetAttribute(selectedAttr);
         Move(col, row);
-        Driver.AddRune((System.Rune)'*');
+        Driver.AddRune((System.Rune)VesselMarker(vessel));
 
         // Name tag next to the marker, flipped left if it would run off-screen
         var label = $" {(string.IsNullOrWhiteSpace(vessel.Name) ? vessel.MMSI.ToString() : vessel.Name)} ";
