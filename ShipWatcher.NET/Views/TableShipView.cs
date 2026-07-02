@@ -9,6 +9,9 @@ public class TableShipView : IShipWatcherView
     private readonly ListView _vesselList;
     private List<Vessel> _sortedVessels = [];
     private List<string> _vesselRows = [];
+    private long? _selectedMmsi;
+    private int _scrollOffset;
+    private bool _suppressSelectionEvents;
 
     public string ViewName => "TABLE";
 
@@ -51,9 +54,20 @@ public class TableShipView : IShipWatcherView
 
         _vesselList.SelectedItemChanged += (args) =>
         {
+            if (_suppressSelectionEvents)
+                return;
+
             var idx = args.Item;
             if (idx >= 0 && idx < _sortedVessels.Count)
-                VesselSelected?.Invoke(_sortedVessels[idx]);
+            {
+                var vessel = _sortedVessels[idx];
+                _selectedMmsi = vessel.MMSI;
+                
+                // Capture the relative screen offset (how many lines from the top of the list view)
+                _scrollOffset = _vesselList.SelectedItem - _vesselList.TopItem;
+                
+                VesselSelected?.Invoke(vessel);
+            }
         };
 
         _vesselList.OpenSelectedItem += (_) =>
@@ -63,8 +77,6 @@ public class TableShipView : IShipWatcherView
                 ShowVesselDetail(_sortedVessels[idx]);
         };
     }
-
-
 
     public IEnumerable<View> GetViews() => [_headerLabel, _vesselList];
 
@@ -102,10 +114,34 @@ public class TableShipView : IShipWatcherView
             ))
             .ToList();
 
-        var selected = _vesselList.SelectedItem;
-        _vesselList.SetSource(_vesselRows);
-        if (selected < _vesselRows.Count)
-            _vesselList.SelectedItem = selected;
+        // SetSource and the programmatic SelectedItem/TopItem assignments below can
+        // fire SelectedItemChanged themselves; suppress the handler so the restore
+        // doesn't clobber _selectedMmsi/_scrollOffset mid-flight.
+        _suppressSelectionEvents = true;
+        try
+        {
+            _vesselList.SetSource(_vesselRows);
+
+            if (_selectedMmsi.HasValue)
+            {
+                var newIdx = _sortedVessels.FindIndex(v => v.MMSI == _selectedMmsi.Value);
+                if (newIdx >= 0)
+                {
+                    // Update selection
+                    _vesselList.SelectedItem = newIdx;
+
+                    // Restore scroll position so the item stays at the same relative screen position
+                    _vesselList.TopItem = Math.Max(0, newIdx - _scrollOffset);
+
+                    // Ensure the detail panel in AppShell updates with fresh data
+                    VesselSelected?.Invoke(_sortedVessels[newIdx]);
+                }
+            }
+        }
+        finally
+        {
+            _suppressSelectionEvents = false;
+        }
     }
 
     public void SetViewFocus() => _vesselList.SetFocus();
