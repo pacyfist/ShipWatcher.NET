@@ -1,4 +1,7 @@
-using Terminal.Gui;
+using System.Collections.ObjectModel;
+using Terminal.Gui.Input;
+using Terminal.Gui.ViewBase;
+using Terminal.Gui.Views;
 
 namespace ShipWatcher.NET.Views;
 
@@ -12,11 +15,30 @@ public class TableShipView : IShipWatcherView
         Updated,
     }
 
+    /// <summary>
+    /// ListView with an extra key binding: O cycles the sort mode. Declared the
+    /// v2 way — a Command implementation plus a KeyBindings entry — so the key
+    /// is discoverable/configurable like every built-in binding.
+    /// </summary>
+    private sealed class SortableListView : ListView
+    {
+        public Action? SortRequested { get; set; }
+
+        public SortableListView()
+        {
+            AddCommand(Command.Toggle, () =>
+            {
+                SortRequested?.Invoke();
+                return true;
+            });
+            KeyBindings.Add(Key.O, Command.Toggle);
+        }
+    }
+
     private readonly VesselStore _store;
     private readonly Label _headerLabel;
-    private readonly ListView _vesselList;
+    private readonly SortableListView _vesselList;
     private List<Vessel> _sortedVessels = [];
-    private List<string> _vesselRows = [];
     private long? _selectedMmsi;
     private int _scrollOffset;
     private bool _suppressSelectionEvents;
@@ -31,57 +53,53 @@ public class TableShipView : IShipWatcherView
     {
         _store = store;
 
-        _headerLabel = new Label(HeaderText())
+        _headerLabel = new Label
         {
+            Text = HeaderText(),
             X = 0,
             Y = 0,
             Width = Dim.Fill(),
-            ColorScheme = Theme.Header,
             Visible = false,
         };
+        _headerLabel.SetScheme(Theme.Header);
 
-        _vesselList = new ListView
+        _vesselList = new SortableListView
         {
             X = 0,
             Y = 1,
             Width = Dim.Fill(),
-            Height = Dim.Fill() - 6,
+            Height = Dim.Fill(6),
             CanFocus = true,
             Visible = false,
-            ColorScheme = Theme.Dark,
+            SortRequested = CycleSortMode,
         };
+        _vesselList.SetScheme(Theme.Dark);
 
-        _vesselList.SelectedItemChanged += (args) =>
+        _vesselList.ValueChanged += (_, _) =>
         {
             if (_suppressSelectionEvents)
                 return;
 
-            var idx = args.Item;
+            var idx = _vesselList.SelectedItem ?? -1;
             if (idx >= 0 && idx < _sortedVessels.Count)
             {
                 var vessel = _sortedVessels[idx];
                 _selectedMmsi = vessel.MMSI;
-                
-                // Capture the relative screen offset (how many lines from the top of the list view)
-                _scrollOffset = _vesselList.SelectedItem - _vesselList.TopItem;
-                
+
+                // Capture the relative screen offset (lines from the top of the list view)
+                _scrollOffset = idx - _vesselList.Viewport.Y;
+
                 VesselSelected?.Invoke(vessel);
             }
         };
 
-        _vesselList.OpenSelectedItem += (_) =>
+        _vesselList.Accepting += (_, e) =>
         {
-            var idx = _vesselList.SelectedItem;
+            var idx = _vesselList.SelectedItem ?? -1;
             if (idx >= 0 && idx < _sortedVessels.Count)
-                ShowVesselDetail(_sortedVessels[idx]);
-        };
-
-        _vesselList.KeyPress += args =>
-        {
-            if ((char)args.KeyEvent.KeyValue is 'o' or 'O')
             {
-                CycleSortMode();
-                args.Handled = true;
+                ShowVesselDetail(_sortedVessels[idx]);
+                e.Handled = true;
             }
         };
     }
@@ -132,7 +150,7 @@ public class TableShipView : IShipWatcherView
                          v.MMSI.ToString().Contains(filter)))
             .ToList();
 
-        _vesselRows = _sortedVessels
+        var rows = new ObservableCollection<string>(_sortedVessels
             .Select(v => FormatRow(
                 v.MMSI.ToString(),
                 Truncate(v.Name, 18),
@@ -142,16 +160,15 @@ public class TableShipView : IShipWatcherView
                 v.Heading == 511 ? "N/A" : $"{v.Heading}",
                 Truncate(v.NavStatusText, 12),
                 Truncate(v.Destination, 16)
-            ))
-            .ToList();
+            )));
 
-        // SetSource and the programmatic SelectedItem/TopItem assignments below can
-        // fire SelectedItemChanged themselves; suppress the handler so the restore
+        // SetSource and the programmatic SelectedItem/Viewport assignments below
+        // fire selection events themselves; suppress the handler so the restore
         // doesn't clobber _selectedMmsi/_scrollOffset mid-flight.
         _suppressSelectionEvents = true;
         try
         {
-            _vesselList.SetSource(_vesselRows);
+            _vesselList.SetSource(rows);
 
             if (_selectedMmsi.HasValue)
             {
@@ -162,7 +179,8 @@ public class TableShipView : IShipWatcherView
                     _vesselList.SelectedItem = newIdx;
 
                     // Restore scroll position so the item stays at the same relative screen position
-                    _vesselList.TopItem = Math.Max(0, newIdx - _scrollOffset);
+                    var top = Math.Max(0, newIdx - _scrollOffset);
+                    _vesselList.Viewport = _vesselList.Viewport with { Y = top };
 
                     // Ensure the detail panel in AppShell updates with fresh data
                     VesselSelected?.Invoke(_sortedVessels[newIdx]);
@@ -177,37 +195,44 @@ public class TableShipView : IShipWatcherView
 
     public void SetViewFocus() => _vesselList.SetFocus();
 
-    private static void ShowVesselDetail(Vessel v)
+    private void ShowVesselDetail(Vessel v)
     {
-        var dlg = new Dialog($"Vessel: {v.Name}", 60, 18);
+        if (_vesselList.App is not { } app)
+            return;
 
-        var info = new Label(
-            $"MMSI:        {v.MMSI}\n" +
-            $"Name:        {v.Name}\n" +
-            $"Call Sign:   {v.CallSign}\n" +
-            $"Ship Type:   {v.ShipTypeText}\n" +
-            $"Position:    {v.CoordinateString}\n" +
-            $"Speed:       {v.Speed:F1} knots\n" +
-            $"Course:      {v.Course:F1}\u00b0\n" +
-            $"Heading:     {(v.Heading == 511 ? "N/A" : $"{v.Heading}\u00b0")}\n" +
-            $"Nav Status:  {v.NavStatusText}\n" +
-            $"Destination: {v.Destination}\n" +
-            $"Draught:     {(v.Draught > 0 ? $"{v.Draught:F1} m" : "N/A")}\n" +
-            $"ETA:         {v.EtaText}\n" +
-            $"Last Update: {v.LastUpdate:yyyy-MM-dd HH:mm:ss} UTC ({v.AgeText})"
-        )
+        using var dlg = new Dialog
         {
+            Title = $"Vessel: {v.Name}",
+            Width = 60,
+            Height = 19,
+        };
+
+        var info = new Label
+        {
+            Text =
+                $"MMSI:        {v.MMSI}\n" +
+                $"Name:        {v.Name}\n" +
+                $"Call Sign:   {v.CallSign}\n" +
+                $"Ship Type:   {v.ShipTypeText}\n" +
+                $"Position:    {v.CoordinateString}\n" +
+                $"Speed:       {v.Speed:F1} knots\n" +
+                $"Course:      {v.Course:F1}°\n" +
+                $"Heading:     {(v.Heading == 511 ? "N/A" : $"{v.Heading}°")}\n" +
+                $"Nav Status:  {v.NavStatusText}\n" +
+                $"Destination: {v.Destination}\n" +
+                $"Draught:     {(v.Draught > 0 ? $"{v.Draught:F1} m" : "N/A")}\n" +
+                $"ETA:         {v.EtaText}\n" +
+                $"Last Update: {v.LastUpdate:yyyy-MM-dd HH:mm:ss} UTC ({v.AgeText})",
             X = 1,
             Y = 0,
             Width = Dim.Fill(),
-            Height = Dim.Fill() - 1,
+            Height = Dim.Fill(1),
         };
 
-        var ok = new Button("Close", true);
-        ok.Clicked += () => Application.RequestStop();
+        var ok = new Button { Text = "Close", IsDefault = true };
         dlg.Add(info);
         dlg.AddButton(ok);
-        Application.Run(dlg);
+        app.Run(dlg);
     }
 
     private static string FormatRow(string mmsi, string name, string pos, string sog, string cog, string hdg, string status, string dest)
@@ -216,5 +241,5 @@ public class TableShipView : IShipWatcherView
     }
 
     private static string Truncate(string s, int max) =>
-        s.Length <= max ? s : s[..(max - 1)] + "\u2026";
+        s.Length <= max ? s : s[..(max - 1)] + "…";
 }

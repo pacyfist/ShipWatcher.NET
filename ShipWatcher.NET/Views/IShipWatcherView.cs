@@ -1,4 +1,4 @@
-using Terminal.Gui;
+using Terminal.Gui.ViewBase;
 
 namespace ShipWatcher.NET.Views;
 

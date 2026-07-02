@@ -1,26 +1,26 @@
-using Terminal.Gui;
+using Terminal.Gui.Drawing;
+using Attribute = Terminal.Gui.Drawing.Attribute;
 
 namespace ShipWatcher.NET.Views;
 
 /// <summary>
 /// Shared color schemes so the shell and views stay visually consistent.
-/// Properties build fresh schemes on access because they need
-/// Application.Driver, which only exists after Application.Init().
+/// v2 Schemes are driver-independent, so these are plain object graphs.
 /// </summary>
 public static class Theme
 {
     /// <summary>White-on-black with a bright-cyan focus highlight.</summary>
-    public static ColorScheme Dark => new()
+    public static Scheme Dark => new()
     {
-        Normal = Application.Driver.MakeAttribute(Color.White, Color.Black),
-        Focus = Application.Driver.MakeAttribute(Color.Black, Color.BrightCyan),
-        HotNormal = Application.Driver.MakeAttribute(Color.BrightGreen, Color.Black),
-        HotFocus = Application.Driver.MakeAttribute(Color.Black, Color.BrightCyan),
+        Normal = new Attribute(Color.White, Color.Black),
+        Focus = new Attribute(Color.Black, Color.BrightCyan),
+        HotNormal = new Attribute(Color.BrightGreen, Color.Black),
+        HotFocus = new Attribute(Color.Black, Color.BrightCyan),
     };
 
     /// <summary>Black-on-cyan header row.</summary>
-    public static ColorScheme Header => new()
+    public static Scheme Header => new()
     {
-        Normal = Application.Driver.MakeAttribute(Color.Black, Color.Cyan),
+        Normal = new Attribute(Color.Black, Color.Cyan),
     };
 }

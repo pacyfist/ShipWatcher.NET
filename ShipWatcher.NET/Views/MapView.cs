@@ -1,16 +1,66 @@
-using Terminal.Gui;
-
-using ShipWatcher.NET;
+using System.Text;
+using Terminal.Gui.Drawing;
+using Terminal.Gui.Input;
+using Terminal.Gui.ViewBase;
+using Attribute = Terminal.Gui.Drawing.Attribute;
 
 namespace ShipWatcher.NET.Views;
 
-public class MapView(VesselStore store) : View
+public class MapView : View
 {
+    private readonly VesselStore _store;
+
     private double _centerLat = 20.0;
     private double _centerLon = 0.0;
     private int _zoomLevel = 0;
 
     private string _filter = "";
+
+    public MapView(VesselStore store)
+    {
+        _store = store;
+        CanFocus = true; // v2 defaults to false
+
+        // Keyboard input the v2 way: declare Command implementations, then
+        // bind keys to them (discoverable and user-remappable).
+        AddCommand(Command.Up, () => Pan(latSteps: 1, lonSteps: 0));
+        AddCommand(Command.Down, () => Pan(latSteps: -1, lonSteps: 0));
+        AddCommand(Command.Left, () => Pan(latSteps: 0, lonSteps: -1));
+        AddCommand(Command.Right, () => Pan(latSteps: 0, lonSteps: 1));
+        AddCommand(Command.ZoomIn, () => Zoom(1));
+        AddCommand(Command.ZoomOut, () => Zoom(-1));
+        AddCommand(Command.FindNext, () => { CycleSelection(1); return true; });
+        AddCommand(Command.FindPrevious, () => { CycleSelection(-1); return true; });
+
+        KeyBindings.Add(Key.CursorUp, Command.Up);
+        KeyBindings.Add(Key.CursorDown, Command.Down);
+        KeyBindings.Add(Key.CursorLeft, Command.Left);
+        KeyBindings.Add(Key.CursorRight, Command.Right);
+        KeyBindings.Add(new Key('+'), Command.ZoomIn);
+        KeyBindings.Add(new Key('='), Command.ZoomIn);
+        KeyBindings.Add(new Key('-'), Command.ZoomOut);
+        KeyBindings.Add(new Key('_'), Command.ZoomOut);
+        KeyBindings.Add(Key.N, Command.FindNext);
+        KeyBindings.Add(Key.P, Command.FindPrevious);
+    }
+
+    private bool Pan(int latSteps, int lonSteps)
+    {
+        double step = LatSpans[_zoomLevel] * 0.1;
+        if (latSteps != 0)
+            _centerLat = Math.Clamp(_centerLat + latSteps * step, -85, 85);
+        if (lonSteps != 0)
+            _centerLon = ((_centerLon + lonSteps * step * 1.5 + 540) % 360) - 180;
+        SetNeedsDraw();
+        return true;
+    }
+
+    private bool Zoom(int direction)
+    {
+        _zoomLevel = Math.Clamp(_zoomLevel + direction, 0, LatSpans.Length - 1);
+        SetNeedsDraw();
+        return true;
+    }
 
     private readonly List<(Vessel vessel, int col, int row)> _visibleVessels = [];
     private long? _selectedMmsi;
@@ -20,7 +70,7 @@ public class MapView(VesselStore store) : View
 
     /// <summary>Current snapshot of the selected vessel, if it is still in the store.</summary>
     public Vessel? SelectedVessel =>
-        _selectedMmsi.HasValue && store.Vessels.TryGetValue(_selectedMmsi.Value, out var v) ? v : null;
+        _selectedMmsi.HasValue && _store.Vessels.TryGetValue(_selectedMmsi.Value, out var v) ? v : null;
 
     private static readonly double[] LatSpans = [180, 120, 80, 50, 30, 18, 10, 5, 3, 1.5];
 
@@ -31,7 +81,7 @@ public class MapView(VesselStore store) : View
     // so the terrain layer is cached and only recomputed on pan/zoom/resize.
     private (double lat, double lon, int zoom, int w, int h) _terrainKey;
     private char[,]? _terrainChars;
-    private Terminal.Gui.Attribute[,]? _terrainAttrs;
+    private Attribute[,]? _terrainAttrs;
 
     private const char UpperHalf = '\u2580'; // ▀
 
@@ -58,56 +108,7 @@ public class MapView(VesselStore store) : View
     public void UpdateFilter(string filter)
     {
         _filter = filter;
-        SetNeedsDisplay();
-    }
-
-    public override bool ProcessKey(KeyEvent keyEvent)
-    {
-        if (keyEvent.KeyValue == '+' || keyEvent.KeyValue == '=')
-        {
-            if (_zoomLevel < LatSpans.Length - 1) _zoomLevel++;
-            SetNeedsDisplay();
-            return true;
-        }
-        if (keyEvent.KeyValue == '-' || keyEvent.KeyValue == '_')
-        {
-            if (_zoomLevel > 0) _zoomLevel--;
-            SetNeedsDisplay();
-            return true;
-        }
-        if (keyEvent.KeyValue is 'n' or 'N')
-        {
-            CycleSelection(1);
-            return true;
-        }
-        if (keyEvent.KeyValue is 'p' or 'P')
-        {
-            CycleSelection(-1);
-            return true;
-        }
-
-        double step = LatSpans[_zoomLevel] * 0.1;
-        switch (keyEvent.Key)
-        {
-            case Key.CursorUp:
-                _centerLat = Math.Clamp(_centerLat + step, -85, 85);
-                SetNeedsDisplay();
-                return true;
-            case Key.CursorDown:
-                _centerLat = Math.Clamp(_centerLat - step, -85, 85);
-                SetNeedsDisplay();
-                return true;
-            case Key.CursorLeft:
-                _centerLon = ((_centerLon - step * 1.5 + 540) % 360) - 180;
-                SetNeedsDisplay();
-                return true;
-            case Key.CursorRight:
-                _centerLon = ((_centerLon + step * 1.5 + 540) % 360) - 180;
-                SetNeedsDisplay();
-                return true;
-        }
-
-        return base.ProcessKey(keyEvent);
+        SetNeedsDraw();
     }
 
     private void CycleSelection(int direction)
@@ -123,16 +124,14 @@ public class MapView(VesselStore store) : View
 
         _selectedMmsi = ordered[idx].vessel.MMSI;
         VesselSelected?.Invoke(ordered[idx].vessel);
-        SetNeedsDisplay();
+        SetNeedsDraw();
     }
 
-    public override void Redraw(Rect bounds)
+    protected override bool OnDrawingContent(DrawContext? context)
     {
-        base.Redraw(bounds);
-
-        int w = bounds.Width;
-        int h = bounds.Height;
-        if (w <= 0 || h <= 0) return;
+        int w = Viewport.Width;
+        int h = Viewport.Height;
+        if (w <= 0 || h <= 0) return true;
 
         double latSpan, lonSpan;
         if (_zoomLevel == 0)
@@ -151,8 +150,8 @@ public class MapView(VesselStore store) : View
         double lonMin = _centerLon - lonSpan / 2;
         double lonMax = _centerLon + lonSpan / 2;
 
-        var shipAttr = Application.Driver.MakeAttribute(Color.BrightYellow, Color.Red);
-        var infoAttr = Application.Driver.MakeAttribute(Color.White, Color.Black);
+        var shipAttr = new Attribute(Color.BrightYellow, Color.Red);
+        var infoAttr = new Attribute(Color.White, Color.Black);
 
         var key = (_centerLat, _centerLon, _zoomLevel, w, h);
         if (_terrainChars is null || _terrainAttrs is null || key != _terrainKey)
@@ -165,15 +164,14 @@ public class MapView(VesselStore store) : View
         {
             for (int col = 0; col < w; col++)
             {
-                Driver.SetAttribute(_terrainAttrs![row, col]);
-                Move(col, row);
-                Driver.AddRune((System.Rune)_terrainChars![row, col]);
+                SetAttribute(_terrainAttrs![row, col]);
+                AddRune(col, row, new Rune(_terrainChars![row, col]));
             }
         }
 
         // Draw ships
         _visibleVessels.Clear();
-        foreach (var vessel in store.Vessels.Values)
+        foreach (var vessel in _store.Vessels.Values)
         {
             if (!string.IsNullOrEmpty(_filter) &&
                 !vessel.Name.Contains(_filter, StringComparison.OrdinalIgnoreCase) &&
@@ -191,44 +189,43 @@ public class MapView(VesselStore store) : View
             if (col >= 0 && col < w && row >= 0 && row < h)
             {
                 _visibleVessels.Add((vessel, col, row));
-                Driver.SetAttribute(shipAttr);
-                Move(col, row);
-                Driver.AddRune((System.Rune)VesselMarker(vessel));
+                SetAttribute(shipAttr);
+                AddRune(col, row, new Rune(VesselMarker(vessel)));
             }
         }
 
         DrawSelectionHighlight(w);
 
         // Info bar
-        Driver.SetAttribute(infoAttr);
+        SetAttribute(infoAttr);
         string info = $" Zoom {_zoomLevel + 1}/{LatSpans.Length} | {latSpan:F1}\u00b0 | {_visibleVessels.Count} ships | +/- zoom | arrows pan | n/p select ";
         int infoX = Math.Max(0, w - info.Length);
         Move(infoX, 0);
-        foreach (char c in info)
-            Driver.AddRune((System.Rune)c);
+        AddStr(info);
 
         // Coordinate label
         string coords = $" {Math.Abs(_centerLat):F1}\u00b0{(_centerLat >= 0 ? "N" : "S")} {Math.Abs(_centerLon):F1}\u00b0{(_centerLon >= 0 ? "E" : "W")} ";
-        Driver.SetAttribute(infoAttr);
+        SetAttribute(infoAttr);
         Move(0, h - 1);
-        foreach (char c in coords)
-            Driver.AddRune((System.Rune)c);
+        AddStr(coords);
+
+        return true;
     }
 
     private void RenderTerrain(int w, int h, double latMax, double lonMin, double latSpan, double lonSpan)
     {
         _terrainChars = new char[h, w];
-        _terrainAttrs = new Terminal.Gui.Attribute[h, w];
+        _terrainAttrs = new Attribute[h, w];
 
         // Half-block rendering: each terminal row = 2 map rows
         int mapH = h * 2;
 
-        var waterWater = Application.Driver.MakeAttribute(Color.Blue, Color.Blue);
-        var landLand = Application.Driver.MakeAttribute(Color.Green, Color.Green);
-        var landWater = Application.Driver.MakeAttribute(Color.Green, Color.Blue);
-        var waterLand = Application.Driver.MakeAttribute(Color.Blue, Color.Green);
-        var gridWaterAttr = Application.Driver.MakeAttribute(Color.DarkGray, Color.Blue);
-        var gridLandAttr = Application.Driver.MakeAttribute(Color.DarkGray, Color.Green);
+        var waterWater = new Attribute(Color.Blue, Color.Blue);
+        var landLand = new Attribute(Color.Green, Color.Green);
+        var landWater = new Attribute(Color.Green, Color.Blue);
+        var waterLand = new Attribute(Color.Blue, Color.Green);
+        var gridWaterAttr = new Attribute(Color.DarkGray, Color.Blue);
+        var gridLandAttr = new Attribute(Color.DarkGray, Color.Green);
 
         double gridSpacing = latSpan switch
         {
@@ -304,20 +301,17 @@ public class MapView(VesselStore store) : View
 
         var (vessel, col, row) = _visibleVessels[idx];
 
-        var selectedAttr = Application.Driver.MakeAttribute(Color.Black, Color.BrightYellow);
-        Driver.SetAttribute(selectedAttr);
-        Move(col, row);
-        Driver.AddRune((System.Rune)VesselMarker(vessel));
+        var selectedAttr = new Attribute(Color.Black, Color.BrightYellow);
+        SetAttribute(selectedAttr);
+        AddRune(col, row, new Rune(VesselMarker(vessel)));
 
         // Name tag next to the marker, flipped left if it would run off-screen
         var label = $" {(string.IsNullOrWhiteSpace(vessel.Name) ? vessel.MMSI.ToString() : vessel.Name)} ";
         var labelX = col + 1 + label.Length <= w ? col + 1 : Math.Max(0, col - label.Length);
+        if (labelX + label.Length > w)
+            label = label[..Math.Max(0, w - labelX)];
         Move(labelX, row);
-        foreach (char c in label)
-        {
-            if (labelX++ >= w) break;
-            Driver.AddRune((System.Rune)c);
-        }
+        AddStr(label);
     }
 
     private bool IsLand(double lat, double lon)

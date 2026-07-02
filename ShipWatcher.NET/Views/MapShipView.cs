@@ -1,4 +1,4 @@
-using Terminal.Gui;
+using Terminal.Gui.ViewBase;
 
 namespace ShipWatcher.NET.Views;
 
@@ -17,9 +17,8 @@ public class MapShipView : IShipWatcherView
             X = 0,
             Y = 0,
             Width = Dim.Fill(),
-            Height = Dim.Fill() - 5,
+            Height = Dim.Fill(6),
             Visible = true,
-            CanFocus = true,
         };
 
         _mapView.VesselSelected += v => VesselSelected?.Invoke(v);
