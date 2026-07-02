@@ -143,7 +143,10 @@ public class AppShell(VesselStore vesselStore, IServiceProvider serviceProvider,
         Application.Run();
         Application.Shutdown();
 
-        _activeSource?.Dispose();
+        // Stop all source activity; the sources themselves are disposed with
+        // the DI container in Program.cs.
+        _cts.Cancel();
+        _cts.Dispose();
     }
 
     private void CycleView()
