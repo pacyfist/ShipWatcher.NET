@@ -40,6 +40,13 @@ public class MapView : View
         KeyBindings.Add(new Key('='), Command.ZoomIn);
         KeyBindings.Add(new Key('-'), Command.ZoomOut);
         KeyBindings.Add(new Key('_'), Command.ZoomOut);
+
+        // Numpad +/-: legacy terminals send the plain characters (covered above),
+        // but kitty-protocol terminals (Ghostty, kitty, foot, WezTerm, Windows
+        // Terminal) report dedicated keypad codepoints the driver does not fold
+        // into '+'/'-', so bind those too.
+        KeyBindings.Add(new Key(KittyKeypadAdd), Command.ZoomIn);
+        KeyBindings.Add(new Key(KittyKeypadSubtract), Command.ZoomOut);
         KeyBindings.Add(Key.N, Command.FindNext);
         KeyBindings.Add(Key.P, Command.FindPrevious);
 
@@ -69,6 +76,11 @@ public class MapView : View
 
     /// <summary>How far (in cells) a click may land from a ship and still select it.</summary>
     private const int ClickTolerance = 2;
+
+    // Kitty keyboard protocol functional codepoints for the keypad operators
+    // (https://sw.kovidgoyal.net/kitty/keyboard-protocol/#functional-key-definitions)
+    private const int KittyKeypadAdd = 57413;      // KP_ADD
+    private const int KittyKeypadSubtract = 57412; // KP_SUBTRACT
 
     /// <summary>
     /// Selects the visible vessel nearest to the clicked cell, if any is within
