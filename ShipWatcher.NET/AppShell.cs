@@ -40,21 +40,13 @@ public class AppShell(VesselStore vesselStore, IServiceProvider serviceProvider,
         };
 
         // Detail panel (shared across views)
-        var darkScheme = new ColorScheme
-        {
-            Normal = Application.Driver.MakeAttribute(Color.White, Color.Black),
-            Focus = Application.Driver.MakeAttribute(Color.Black, Color.BrightCyan),
-            HotNormal = Application.Driver.MakeAttribute(Color.BrightGreen, Color.Black),
-            HotFocus = Application.Driver.MakeAttribute(Color.Black, Color.BrightCyan),
-        };
-
         var detailFrame = new FrameView("Vessel Detail")
         {
             X = 0,
             Y = Pos.AnchorEnd(5),
             Width = Dim.Fill(),
             Height = 5,
-            ColorScheme = darkScheme,
+            ColorScheme = Theme.Dark,
         };
 
         var detailLabel = new Label("Select a vessel to see details (Tab to switch view)")

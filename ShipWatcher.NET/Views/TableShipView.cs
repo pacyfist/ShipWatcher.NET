@@ -26,19 +26,8 @@ public class TableShipView : IShipWatcherView
             X = 0,
             Y = 0,
             Width = Dim.Fill(),
-            ColorScheme = new ColorScheme
-            {
-                Normal = Application.Driver.MakeAttribute(Color.Black, Color.Cyan),
-            },
+            ColorScheme = Theme.Header,
             Visible = false,
-        };
-
-        var darkScheme = new ColorScheme
-        {
-            Normal = Application.Driver.MakeAttribute(Color.White, Color.Black),
-            Focus = Application.Driver.MakeAttribute(Color.Black, Color.BrightCyan),
-            HotNormal = Application.Driver.MakeAttribute(Color.BrightGreen, Color.Black),
-            HotFocus = Application.Driver.MakeAttribute(Color.Black, Color.BrightCyan),
         };
 
         _vesselList = new ListView
@@ -49,7 +38,7 @@ public class TableShipView : IShipWatcherView
             Height = Dim.Fill() - 6,
             CanFocus = true,
             Visible = false,
-            ColorScheme = darkScheme,
+            ColorScheme = Theme.Dark,
         };
 
         _vesselList.SelectedItemChanged += (args) =>
