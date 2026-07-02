@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net.Sockets;
 using System.Text;
 using Serilog;
@@ -6,13 +7,16 @@ namespace ShipWatcher.NET.Sources;
 
 /// <summary>
 /// AIS data source connecting to the Norwegian Coastal Administration (Kystverket)
-/// raw TCP NMEA stream at 153.44.253.27:5631.
+/// raw TCP NMEA stream (default 153.44.253.27:5631, configurable in the source dialog).
 /// Provides open AIS data in IEC 62320-1 format (NMEA sentences).
 /// </summary>
 public class KystverketAisClient(VesselStore store) : AisSourceBase, ISourceDescriptor
 {
-    private const string Host = "153.44.253.27";
-    private const int Port = 5631;
+    private const string DefaultHost = "153.44.253.27";
+    private const int DefaultPort = 5631;
+
+    private string _host = DefaultHost;
+    private int _port = DefaultPort;
 
     private TcpClient? _tcp;
     private readonly NmeaParser _parser = new();
@@ -24,17 +28,42 @@ public class KystverketAisClient(VesselStore store) : AisSourceBase, ISourceDesc
 
     // ISourceDescriptor
     public string DisplayLabel => "Kystverket (Norway, open data)";
-    public IReadOnlyList<SourceConfigField> ConfigFields => [];
-    public string? ValidateConfig() => null;
-    public void ApplyConfig(IReadOnlyDictionary<string, string> values) { }
+
+    public IReadOnlyList<SourceConfigField> ConfigFields =>
+    [
+        new("host", "Host", _host),
+        new("port", "Port", _port.ToString(CultureInfo.InvariantCulture)),
+    ];
+
+    public string? ValidateConfig()
+    {
+        if (string.IsNullOrWhiteSpace(_host))
+            return "Host is required";
+        if (_port is < 1 or > 65535)
+            return "Port must be a number between 1 and 65535";
+        return null;
+    }
+
+    public void ApplyConfig(IReadOnlyDictionary<string, string> values)
+    {
+        if (values.TryGetValue("host", out var host))
+            _host = host.Trim();
+
+        if (values.TryGetValue("port", out var portRaw))
+        {
+            _port = int.TryParse(portRaw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var port)
+                ? port
+                : -1; // invalid marker so ValidateConfig rejects it
+        }
+    }
 
     protected override async Task ReceiveAsync(CancellationToken ct)
     {
         var tcp = new TcpClient();
         _tcp = tcp;
 
-        Log.Information("Connecting to Kystverket AIS at {Host}:{Port}", Host, Port);
-        await tcp.ConnectAsync(Host, Port, ct);
+        Log.Information("Connecting to Kystverket AIS at {Host}:{Port}", _host, _port);
+        await tcp.ConnectAsync(_host, _port, ct);
         Log.Information("Connected to Kystverket AIS stream");
 
         using var reader = new StreamReader(tcp.GetStream(), Encoding.ASCII);

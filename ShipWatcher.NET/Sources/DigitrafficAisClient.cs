@@ -12,7 +12,10 @@ namespace ShipWatcher.NET.Sources;
 /// </summary>
 public class DigitrafficAisClient(VesselStore store) : AisSourceBase, ISourceDescriptor
 {
-    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(60);
+    private const int DefaultPollSeconds = 60;
+    private const int MinPollSeconds = 10; // stay polite to the open API
+
+    private int _pollSeconds = DefaultPollSeconds;
 
     private readonly HttpClient _http = CreateHttpClient();
     private volatile bool _polling;
@@ -24,9 +27,25 @@ public class DigitrafficAisClient(VesselStore store) : AisSourceBase, ISourceDes
 
     // ISourceDescriptor
     public string DisplayLabel => "Digitraffic (Finland, open data)";
-    public IReadOnlyList<SourceConfigField> ConfigFields => [];
-    public string? ValidateConfig() => null;
-    public void ApplyConfig(IReadOnlyDictionary<string, string> values) { }
+
+    public IReadOnlyList<SourceConfigField> ConfigFields =>
+    [
+        new("pollSeconds", "Poll every (s)", _pollSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+    ];
+
+    public string? ValidateConfig() =>
+        _pollSeconds < MinPollSeconds ? $"Poll interval must be at least {MinPollSeconds} seconds" : null;
+
+    public void ApplyConfig(IReadOnlyDictionary<string, string> values)
+    {
+        if (values.TryGetValue("pollSeconds", out var raw))
+        {
+            _pollSeconds = int.TryParse(raw, System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out var seconds)
+                ? seconds
+                : -1; // invalid marker so ValidateConfig rejects it
+        }
+    }
 
     private static HttpClient CreateHttpClient()
     {
@@ -65,7 +84,7 @@ public class DigitrafficAisClient(VesselStore store) : AisSourceBase, ISourceDes
                     Log.Error(ex, "Digitraffic poll failed");
                 }
 
-                await Task.Delay(PollInterval, ct);
+                await Task.Delay(TimeSpan.FromSeconds(Math.Max(_pollSeconds, MinPollSeconds)), ct);
             }
         }
         finally
