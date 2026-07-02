@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -6,27 +5,16 @@ using Serilog;
 
 namespace ShipWatcher.NET.Sources;
 
-public class AisClient(VesselStore store, string apiKey, double[][][] boundingBoxes) : IAisDataSource, ISourceDescriptor
+public class AisClient(VesselStore store, string apiKey, double[][][] boundingBoxes) : AisSourceBase, ISourceDescriptor
 {
     private string _apiKey = apiKey;
-    private double[][][] _boundingBoxes = boundingBoxes;
+    private readonly double[][][] _boundingBoxes = boundingBoxes;
     private ClientWebSocket? _ws;
-    private CancellationTokenSource? _cts;
-    private static readonly ILogger Log = new LoggerConfiguration()
-        .MinimumLevel.Debug()
-        .WriteTo.File(
-            Path.Combine(AppContext.BaseDirectory, "shipwatcher.log"),
-            rollingInterval: RollingInterval.Day,
-            retainedFileCountLimit: 7,
-            outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
-        .CreateLogger();
 
-    public int MessageCount { get; private set; }
-    public bool IsConnected => _ws?.State == WebSocketState.Open;
-    public string? LastError { get; private set; }
-    public string SourceName => "aisstream.io";
+    protected override ILogger Log { get; } = Serilog.Log.ForContext<AisClient>();
 
-    public event Action? OnDataUpdated;
+    public override bool IsConnected => _ws?.State == WebSocketState.Open;
+    public override string SourceName => "aisstream.io";
 
     // ISourceDescriptor
     public string DisplayLabel => "aisstream.io (global, requires API key)";
@@ -45,72 +33,57 @@ public class AisClient(VesselStore store, string apiKey, double[][][] boundingBo
             _apiKey = key;
     }
 
-    public async Task ConnectAsync(CancellationToken ct = default)
+    protected override async Task ReceiveAsync(CancellationToken ct)
     {
-        _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        _ws = new ClientWebSocket();
+        var ws = new ClientWebSocket();
+        _ws = ws;
 
-        try
+        Log.Information("Connecting to aisstream.io");
+        await ws.ConnectAsync(new Uri("wss://stream.aisstream.io/v0/stream"), ct);
+
+        var subscription = new AisSubscription(
+            _apiKey,
+            _boundingBoxes,
+            ["PositionReport", "ShipStaticData", "StandardClassBPositionReport"]
+        );
+
+        var json = JsonSerializer.Serialize(subscription);
+        await ws.SendAsync(Encoding.UTF8.GetBytes(json), WebSocketMessageType.Text, true, ct);
+        Log.Information("Subscription sent. Starting receive loop");
+
+        var buffer = new byte[8192];
+        var healthy = false;
+
+        while (!ct.IsCancellationRequested && ws.State == WebSocketState.Open)
         {
-            Log.Information("Connecting to aisstream.io");
-            await _ws.ConnectAsync(new Uri("wss://stream.aisstream.io/v0/stream"), _cts.Token);
-            Log.Information("Connected. Sending subscription");
+            using var ms = new MemoryStream();
+            WebSocketReceiveResult result;
 
-            var subscription = new AisSubscription(
-                _apiKey,
-                _boundingBoxes,
-                ["PositionReport", "ShipStaticData", "StandardClassBPositionReport"]
-            );
+            do
+            {
+                result = await ws.ReceiveAsync(buffer, ct);
+                ms.Write(buffer, 0, result.Count);
+            } while (!result.EndOfMessage);
 
-            var json = JsonSerializer.Serialize(subscription);
-            var bytes = Encoding.UTF8.GetBytes(json);
-            await _ws.SendAsync(bytes, WebSocketMessageType.Text, true, _cts.Token);
-            Log.Information("Subscription sent. Starting receive loop");
+            if (result.MessageType == WebSocketMessageType.Close)
+                return;
 
-            _ = Task.Run(() => ReceiveLoop(_cts.Token), _cts.Token);
-        }
-        catch (Exception ex)
-        {
-            LastError = ex.Message;
-            Log.Error(ex, "ConnectAsync failed");
+            ProcessMessage(Encoding.UTF8.GetString(ms.ToArray()));
+
+            if (!healthy)
+            {
+                // Only report healthy once data flows: a bad API key connects
+                // fine and is then closed, and must keep backing off.
+                ReportHealthy();
+                healthy = true;
+            }
         }
     }
 
-    private async Task ReceiveLoop(CancellationToken ct)
+    protected override void CleanupConnection()
     {
-        var buffer = new byte[8192];
-
-        while (!ct.IsCancellationRequested && _ws?.State == WebSocketState.Open)
-        {
-            try
-            {
-                using var ms = new MemoryStream();
-                WebSocketReceiveResult result;
-
-                do
-                {
-                    result = await _ws.ReceiveAsync(buffer, ct);
-                    ms.Write(buffer, 0, result.Count);
-                } while (!result.EndOfMessage);
-
-                if (result.MessageType == WebSocketMessageType.Close)
-                    break;
-
-                var text = Encoding.UTF8.GetString(ms.ToArray());
-                ProcessMessage(text);
-            }
-            catch (OperationCanceledException)
-            {
-                Log.Debug("ReceiveLoop cancelled");
-                break;
-            }
-            catch (Exception ex)
-            {
-                LastError = ex.Message;
-                Log.Error(ex, "ReceiveLoop failed");
-                break;
-            }
-        }
+        var ws = Interlocked.Exchange(ref _ws, null);
+        ws?.Dispose();
     }
 
     private void ProcessMessage(string json)
@@ -165,34 +138,11 @@ public class AisClient(VesselStore store, string apiKey, double[][][] boundingBo
                     _ => vessel
                 };
             });
-
-            OnDataUpdated?.Invoke();
         }
         catch (Exception ex)
         {
             Log.Warning(ex, "ProcessMessage failed. JSON preview: {JsonPreview}",
                 json[..Math.Min(json.Length, 200)]);
         }
-    }
-
-    public void Disconnect()
-    {
-        try
-        {
-            _cts?.Cancel();
-            _ws?.Dispose();
-            _cts?.Dispose();
-            _ws = null;
-            _cts = null;
-        }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "Disconnect failed");
-        }
-    }
-
-    public void Dispose()
-    {
-        Disconnect();
     }
 }

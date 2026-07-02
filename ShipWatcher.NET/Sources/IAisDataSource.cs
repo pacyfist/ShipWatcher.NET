@@ -1,5 +1,3 @@
-using System.Collections.Concurrent;
-
 namespace ShipWatcher.NET.Sources;
 
 public interface IAisDataSource : IDisposable
@@ -9,8 +7,11 @@ public interface IAisDataSource : IDisposable
     string? LastError { get; }
     string SourceName { get; }
 
-    event Action? OnDataUpdated;
-
+    /// <summary>
+    /// Start the source. Returns immediately; the connection is supervised in
+    /// the background and reconnects automatically until <see cref="Disconnect"/>.
+    /// </summary>
     Task ConnectAsync(CancellationToken ct = default);
+
     void Disconnect();
 }

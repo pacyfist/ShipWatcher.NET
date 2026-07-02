@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Serilog;
 
@@ -9,25 +10,17 @@ namespace ShipWatcher.NET.Sources;
 /// API: https://www.digitraffic.fi/en/marine-traffic/
 /// No registration or API key required.
 /// </summary>
-public class DigitrafficAisClient(VesselStore store) : IAisDataSource, ISourceDescriptor
+public class DigitrafficAisClient(VesselStore store) : AisSourceBase, ISourceDescriptor
 {
-    private readonly HttpClient _http = new(new HttpClientHandler
-    {
-        AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
-    })
-    {
-        Timeout = TimeSpan.FromMinutes(2)
-    };
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(60);
 
-    private CancellationTokenSource? _cts;
-    private static readonly ILogger Log = Serilog.Log.ForContext<DigitrafficAisClient>();
+    private readonly HttpClient _http = CreateHttpClient();
+    private volatile bool _polling;
 
-    public int MessageCount { get; private set; }
-    public bool IsConnected { get; private set; }
-    public string? LastError { get; private set; }
-    public string SourceName => "Digitraffic (Finland)";
+    protected override ILogger Log { get; } = Serilog.Log.ForContext<DigitrafficAisClient>();
 
-    public event Action? OnDataUpdated;
+    public override bool IsConnected => _polling;
+    public override string SourceName => "Digitraffic (Finland)";
 
     // ISourceDescriptor
     public string DisplayLabel => "Digitraffic (Finland, open data)";
@@ -35,76 +28,86 @@ public class DigitrafficAisClient(VesselStore store) : IAisDataSource, ISourceDe
     public string? ValidateConfig() => null;
     public void ApplyConfig(IReadOnlyDictionary<string, string> values) { }
 
-    public async Task ConnectAsync(CancellationToken ct = default)
+    private static HttpClient CreateHttpClient()
     {
-        _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        IsConnected = true;
+        var http = new HttpClient(new HttpClientHandler
+        {
+            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
+        })
+        {
+            Timeout = TimeSpan.FromMinutes(2)
+        };
 
         // Required headers for Digitraffic API
-        _http.DefaultRequestHeaders.Clear();
-        _http.DefaultRequestHeaders.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
-        _http.DefaultRequestHeaders.AcceptEncoding.Add(new System.Net.Http.Headers.StringWithQualityHeaderValue("gzip"));
-        _http.DefaultRequestHeaders.Add("User-Agent", "ShipWatcher.NET/1.0 (https://github.com/eich/ShipWatcher.NET)");
+        http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        http.DefaultRequestHeaders.AcceptEncoding.Add(new StringWithQualityHeaderValue("gzip"));
+        http.DefaultRequestHeaders.Add("User-Agent", "ShipWatcher.NET/1.0 (https://github.com/eich/ShipWatcher.NET)");
+        return http;
+    }
 
+    protected override async Task ReceiveAsync(CancellationToken ct)
+    {
         Log.Information("Starting Digitraffic polling (Finland)");
-        _ = Task.Run(() => PollLoop(_cts.Token), _cts.Token);
-        await Task.CompletedTask;
-    }
+        _polling = true;
 
-    public void Disconnect()
-    {
-        _cts?.Cancel();
-        _cts?.Dispose();
-        _cts = null;
-        IsConnected = false;
-    }
-
-    private async Task PollLoop(CancellationToken ct)
-    {
-        while (!ct.IsCancellationRequested)
+        try
         {
-            try
+            while (!ct.IsCancellationRequested)
             {
-                Log.Debug("Polling Digitraffic locations...");
-                // 1. Fetch latest locations (GeoJSON)
-                var locationCollection = await _http.GetFromJsonAsync<DigitrafficLocationCollection>(
-                    "https://meri.digitraffic.fi/api/ais/v1/locations", ct);
-
-                if (locationCollection?.Features != null)
+                try
                 {
-                    Log.Debug("Received {Count} vessel locations from Digitraffic", locationCollection.Features.Count);
-                    foreach (var feature in locationCollection.Features)
-                    {
-                        UpdateVessel(feature);
-                        MessageCount++;
-                    }
+                    await PollOnceAsync(ct);
+                    ReportHealthy();
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    LastError = ex.Message;
+                    Log.Error(ex, "Digitraffic poll failed");
                 }
 
-                Log.Debug("Polling Digitraffic vessel metadata...");
-                // 2. Fetch vessel metadata (names, destinations)
-                var vessels = await _http.GetFromJsonAsync<List<DigitrafficVessel>>(
-                    "https://meri.digitraffic.fi/api/ais/v1/vessels", ct);
-
-                if (vessels != null)
-                {
-                    Log.Debug("Received {Count} vessel metadata entries from Digitraffic", vessels.Count);
-                    foreach (var v in vessels)
-                    {
-                        UpdateVesselMetadata(v);
-                    }
-                }
-
-                OnDataUpdated?.Invoke();
-                LastError = null;
+                await Task.Delay(PollInterval, ct);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+        }
+        finally
+        {
+            _polling = false;
+        }
+    }
+
+    protected override void CleanupConnection()
+    {
+        _polling = false;
+    }
+
+    private async Task PollOnceAsync(CancellationToken ct)
+    {
+        Log.Debug("Polling Digitraffic locations...");
+        // 1. Fetch latest locations (GeoJSON)
+        var locationCollection = await _http.GetFromJsonAsync<DigitrafficLocationCollection>(
+            "https://meri.digitraffic.fi/api/ais/v1/locations", ct);
+
+        if (locationCollection?.Features != null)
+        {
+            Log.Debug("Received {Count} vessel locations from Digitraffic", locationCollection.Features.Count);
+            foreach (var feature in locationCollection.Features)
             {
-                LastError = ex.Message;
-                Log.Error(ex, "Digitraffic poll failed");
+                UpdateVessel(feature);
+                MessageCount++;
             }
+        }
 
-            // Poll every 60 seconds
-            await Task.Delay(TimeSpan.FromSeconds(60), ct);
+        Log.Debug("Polling Digitraffic vessel metadata...");
+        // 2. Fetch vessel metadata (names, destinations)
+        var vessels = await _http.GetFromJsonAsync<List<DigitrafficVessel>>(
+            "https://meri.digitraffic.fi/api/ais/v1/vessels", ct);
+
+        if (vessels != null)
+        {
+            Log.Debug("Received {Count} vessel metadata entries from Digitraffic", vessels.Count);
+            foreach (var v in vessels)
+            {
+                UpdateVesselMetadata(v);
+            }
         }
     }
 
@@ -144,9 +147,9 @@ public class DigitrafficAisClient(VesselStore store) : IAisDataSource, ISourceDe
         });
     }
 
-    public void Dispose()
+    public override void Dispose()
     {
-        Disconnect();
+        base.Dispose();
         _http.Dispose();
     }
 }

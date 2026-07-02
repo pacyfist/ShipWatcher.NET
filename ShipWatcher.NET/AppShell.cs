@@ -101,7 +101,7 @@ public class AppShell(VesselStore vesselStore, IServiceProvider serviceProvider,
             new(Key.Q | Key.CtrlMask, "~Ctrl+Q~ Quit", () => Application.RequestStop()),
             new(Key.Tab, "~Tab~ Cycle View", CycleView),
             new(Key.C, "~C~ Clear", () => { vesselStore.Clear(); RefreshActiveView(); }),
-            new(Key.R | Key.CtrlMask, "~Ctrl+R~ Reconnect", async () => await Reconnect()),
+            new(Key.R | Key.CtrlMask, "~Ctrl+R~ Reconnect", Reconnect),
             new(Key.F, "~F~ Filter", ShowFilterDialog),
             new(Key.S, "~S~ Source", ShowSourceDialog),
         });
@@ -137,8 +137,8 @@ public class AppShell(VesselStore vesselStore, IServiceProvider serviceProvider,
             return true;
         });
 
-        // Connect and run
-        _ = Task.Run(async () => await _activeSource.ConnectAsync(_cts.Token));
+        // Connect and run (ConnectAsync returns immediately; the connection is supervised)
+        _ = _activeSource.ConnectAsync(_cts.Token);
 
         Application.Run();
         Application.Shutdown();
@@ -244,19 +244,12 @@ public class AppShell(VesselStore vesselStore, IServiceProvider serviceProvider,
                 _activeSource?.Disconnect();
                 _currentSourceIndex = selected;
                 _activeSource = _sources[_currentSourceIndex];
-                if (_activeSource != null)
-                {
-                    _ = Task.Run(async () => await _activeSource.ConnectAsync(_cts.Token));
-                }
+                _ = _activeSource?.ConnectAsync(_cts.Token);
             }
             else if (configValues.Count > 0)
             {
                 // Same source but config changed — reconnect
-                _activeSource?.Disconnect();
-                if (_activeSource != null)
-                {
-                    _ = Task.Run(async () => await _activeSource.ConnectAsync(_cts.Token));
-                }
+                _ = _activeSource?.ConnectAsync(_cts.Token);
             }
 
             Application.RequestStop();
@@ -298,12 +291,9 @@ public class AppShell(VesselStore vesselStore, IServiceProvider serviceProvider,
         Application.Run(dlg);
     }
 
-    private async Task Reconnect()
+    private void Reconnect()
     {
-        var src = _activeSource;
-        if (src is null) return;
-
-        src.Disconnect();
-        await Task.Run(async () => await src.ConnectAsync(_cts.Token));
+        // ConnectAsync tears down any existing connection itself
+        _ = _activeSource?.ConnectAsync(_cts.Token);
     }
 }
