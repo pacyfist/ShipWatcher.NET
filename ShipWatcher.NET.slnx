@@ -1,3 +1,4 @@
 <Solution>
+  <Project Path="ShipWatcher.NET.Tests/ShipWatcher.NET.Tests.csproj" />
   <Project Path="ShipWatcher.NET/ShipWatcher.NET.csproj" />
 </Solution>
