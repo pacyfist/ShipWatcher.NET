@@ -11,10 +11,20 @@ public class NmeaParser
 {
     private static readonly ILogger Log = Serilog.Log.ForContext<NmeaParser>();
 
-    // Buffer for multi-part messages: key = (fragmentCount, fragmentId, sequentialMessageId)
-    private readonly Dictionary<int, string> _multiPartBuffer = new();
-    private int _lastSequentialId = -1;
-    private int _lastFragmentCount;
+    private static readonly TimeSpan FragmentTimeout = TimeSpan.FromSeconds(30);
+
+    // Real feeds interleave fragments from different radio channels (A/B) and
+    // sequence ids, so reassembly is keyed per (channel, sequence id) instead
+    // of assuming one multi-part message in flight at a time.
+    private readonly Dictionary<(string Channel, int SeqId), FragmentSet> _multiPartBuffer = new();
+
+    private sealed class FragmentSet
+    {
+        public required int FragmentCount { get; init; }
+        public required DateTime FirstSeen { get; init; }
+        public Dictionary<int, string> Parts { get; } = new();
+        public int LastFragmentFillBits { get; set; }
+    }
 
     public NmeaParseResult? Parse(string sentence)
     {
@@ -64,6 +74,7 @@ public class NmeaParser
             return null;
 
         int.TryParse(parts[3], out var sequentialMessageId);
+        var channel = parts[4];
         var payload = parts[5];
         // Fill bits from field 6 (before checksum)
         var fillField = parts[6];
@@ -75,43 +86,71 @@ public class NmeaParser
             return DecodePayload(payload, fillBits);
         }
 
-        // Multi-part message
-        if (fragmentNumber == 1)
-        {
-            _multiPartBuffer.Clear();
-            _lastSequentialId = sequentialMessageId;
-            _lastFragmentCount = fragmentCount;
-        }
-        else if (sequentialMessageId != _lastSequentialId || fragmentCount != _lastFragmentCount)
-        {
-            _multiPartBuffer.Clear();
+        if (fragmentNumber < 1 || fragmentNumber > fragmentCount)
             return null;
-        }
 
-        _multiPartBuffer[fragmentNumber] = payload;
+        // Multi-part message
+        var now = DateTime.UtcNow;
+        EvictStaleFragments(now);
 
-        if (_multiPartBuffer.Count == fragmentCount)
+        var key = (channel, sequentialMessageId);
+        if (!_multiPartBuffer.TryGetValue(key, out var set) || set.FragmentCount != fragmentCount)
         {
-            var combined = new StringBuilder();
-            for (int i = 1; i <= fragmentCount; i++)
-            {
-                if (!_multiPartBuffer.TryGetValue(i, out var part))
-                {
-                    _multiPartBuffer.Clear();
-                    return null;
-                }
-                combined.Append(part);
-            }
-            _multiPartBuffer.Clear();
-            return DecodePayload(combined.ToString(), fillBits);
+            set = new FragmentSet { FragmentCount = fragmentCount, FirstSeen = now };
+            _multiPartBuffer[key] = set;
         }
 
-        return null; // Waiting for more parts
+        set.Parts[fragmentNumber] = payload;
+        if (fragmentNumber == fragmentCount)
+        {
+            // Fill bits apply to the final fragment's payload only
+            set.LastFragmentFillBits = fillBits;
+        }
+
+        if (set.Parts.Count < set.FragmentCount)
+            return null; // Waiting for more parts
+
+        _multiPartBuffer.Remove(key);
+
+        var combined = new StringBuilder();
+        for (int i = 1; i <= set.FragmentCount; i++)
+        {
+            if (!set.Parts.TryGetValue(i, out var part))
+                return null;
+            combined.Append(part);
+        }
+
+        return DecodePayload(combined.ToString(), set.LastFragmentFillBits);
+    }
+
+    private void EvictStaleFragments(DateTime now)
+    {
+        if (_multiPartBuffer.Count == 0)
+            return;
+
+        List<(string, int)>? stale = null;
+        foreach (var (key, set) in _multiPartBuffer)
+        {
+            if (now - set.FirstSeen > FragmentTimeout)
+                (stale ??= []).Add(key);
+        }
+
+        if (stale is null)
+            return;
+
+        foreach (var key in stale)
+            _multiPartBuffer.Remove(key);
+        Log.Debug("Evicted {Count} stale incomplete multi-part message(s)", stale.Count);
     }
 
     private static NmeaParseResult? DecodePayload(string payload, int fillBits)
     {
         var bits = DecodeSixBit(payload);
+
+        // Fill bits pad the last armored character and are not message content
+        if (fillBits > 0 && fillBits < 6 && fillBits <= bits.Length)
+            Array.Resize(ref bits, bits.Length - fillBits);
+
         if (bits.Length < 6)
             return null;
 
@@ -180,7 +219,7 @@ public class NmeaParser
         var etaHour = (int)GetUnsigned(bits, 283, 5);
         var etaMinute = (int)GetUnsigned(bits, 288, 6);
 
-        var destination = bits.Length >= 422 ? GetString(bits, 302, 120).Trim() : "";
+        var destination = GetString(bits, 302, 120).Trim();
 
         if (mmsi == 0)
             return null;

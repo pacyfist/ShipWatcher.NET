@@ -139,6 +139,56 @@ public class NmeaParserTests
     }
 
     [Fact]
+    public void Reassembles_Interleaved_MultiPart_Messages_Across_Channels()
+    {
+        var parser = new NmeaParser();
+
+        // Fragments of two different type 5 messages (channel A seq 1 and
+        // channel B seq 2) arriving interleaved, as real feeds deliver them.
+        var a1 = parser.Parse("!AIVDM,2,1,1,A,53KMVtP00000taQT001@E=B1HE=<Dh0000000016000001i<N=j1C4jCRj@0,0*71");
+        var b1 = parser.Parse("!AIVDM,2,1,2,B,53LC7gh0000048<@000u@PE:1<PU00000000001@000000@P0Hm5DRm@0000,0*3D");
+        var a2 = parser.Parse("!AIVDM,2,2,1,A,00000000000,2*25");
+        var b2 = parser.Parse("!AIVDM,2,2,2,B,00000000000,2*25");
+
+        Assert.Null(a1);
+        Assert.Null(b1);
+
+        Assert.NotNull(a2);
+        Assert.Equal(230123250, a2.MMSI);
+        Assert.Equal("TEST VESSEL", a2.Name);
+        Assert.Equal("HELSINKI", a2.Destination);
+
+        Assert.NotNull(b2);
+        Assert.Equal(230999999, b2.MMSI);
+        Assert.Equal("OTHER SHIP", b2.Name);
+        Assert.Equal("ABCD", b2.CallSign);
+        Assert.Equal(80, b2.ShipType);
+        Assert.Equal(9.9, b2.Draught, Tolerance);
+        Assert.Equal("TURKU", b2.Destination);
+    }
+
+    [Fact]
+    public void Incomplete_MultiPart_Message_Does_Not_Corrupt_Later_Messages()
+    {
+        var parser = new NmeaParser();
+
+        // First fragment of a type 5 arrives, second never does.
+        var orphan = parser.Parse("!AIVDM,2,1,1,A,53KMVtP00000taQT001@E=B1HE=<Dh0000000016000001i<N=j1C4jCRj@0,0*71");
+        Assert.Null(orphan);
+
+        // A single-part type 1 must still parse normally.
+        var result = parser.Parse("!AIVDM,1,1,,A,13o7W>0P1V0HFV0RSS44lQEp0000,0*10");
+        Assert.NotNull(result);
+        Assert.Equal(259123000, result.MMSI);
+
+        // A fresh complete pair on the same channel/seq must also still work.
+        parser.Parse("!AIVDM,2,1,1,A,53KMVtP00000taQT001@E=B1HE=<Dh0000000016000001i<N=j1C4jCRj@0,0*71");
+        var complete = parser.Parse("!AIVDM,2,2,1,A,00000000000,2*25");
+        Assert.NotNull(complete);
+        Assert.Equal(230123250, complete.MMSI);
+    }
+
+    [Fact]
     public void Ignores_Unsupported_Message_Types()
     {
         var parser = new NmeaParser();
