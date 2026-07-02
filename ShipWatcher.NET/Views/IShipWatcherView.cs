@@ -26,6 +26,12 @@ public interface IShipWatcherView
     /// <summary>Set focus to this view's primary interactive element.</summary>
     void SetViewFocus();
 
+    /// <summary>
+    /// Programmatically select a vessel by MMSI (used to carry the selection
+    /// across view switches). Null clears the selection.
+    /// </summary>
+    void SelectVessel(long? mmsi);
+
     /// <summary>Raised when the user selects/highlights a vessel in this view.</summary>
     event Action<Vessel?>? VesselSelected;
 }

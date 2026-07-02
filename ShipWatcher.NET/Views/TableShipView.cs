@@ -195,6 +195,12 @@ public class TableShipView : IShipWatcherView
 
     public void SetViewFocus() => _vesselList.SetFocus();
 
+    public void SelectVessel(long? mmsi)
+    {
+        // The next Refresh restores the selection (and scroll position) from this
+        _selectedMmsi = mmsi;
+    }
+
     private void ShowVesselDetail(Vessel v)
     {
         if (_vesselList.App is { } app)

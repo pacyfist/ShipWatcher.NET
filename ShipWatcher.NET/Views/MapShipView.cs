@@ -45,4 +45,6 @@ public class MapShipView : IShipWatcherView
     }
 
     public void SetViewFocus() => _mapView.SetFocus();
+
+    public void SelectVessel(long? mmsi) => _mapView.SelectVessel(mmsi);
 }

@@ -22,6 +22,7 @@ public class AppShell(VesselStore vesselStore, IServiceProvider serviceProvider,
     private int _currentSourceIndex = defaultSourceIndex;
     private int _activeViewIndex;
     private string _nameFilter = "";
+    private long? _selectedMmsi;
 
     public void Run()
     {
@@ -75,6 +76,7 @@ public class AppShell(VesselStore vesselStore, IServiceProvider serviceProvider,
             {
                 if (v is not null)
                 {
+                    _selectedMmsi = v.MMSI;
                     detailLabel.Text =
                         $"MMSI: {v.MMSI}  Name: {v.Name}  Call: {v.CallSign}  Type: {v.ShipTypeText}\n" +
                         $"Pos: {v.CoordinateString}  SOG: {v.Speed:F1}kn  COG: {v.Course:F1}°  HDG: {v.Heading}°  Status: {v.NavStatusText}\n" +
@@ -153,6 +155,10 @@ public class AppShell(VesselStore vesselStore, IServiceProvider serviceProvider,
         _views[_activeViewIndex].Deactivate();
         _activeViewIndex = (_activeViewIndex + 1) % _views.Count;
         _views[_activeViewIndex].Activate();
+
+        // Carry the selection over so the same vessel is highlighted in the new view
+        _views[_activeViewIndex].SelectVessel(_selectedMmsi);
+
         _views[_activeViewIndex].SetViewFocus();
         RefreshActiveView();
     }

@@ -142,6 +142,13 @@ public class MapView : View
     public Vessel? SelectedVessel =>
         _selectedMmsi.HasValue && _store.Vessels.TryGetValue(_selectedMmsi.Value, out var v) ? v : null;
 
+    /// <summary>Programmatically select a vessel; it is highlighted when on screen.</summary>
+    public void SelectVessel(long? mmsi)
+    {
+        _selectedMmsi = mmsi;
+        SetNeedsDraw();
+    }
+
     private static readonly double[] LatSpans = [180, 120, 80, 50, 30, 18, 10, 5, 3, 1.5];
 
     private readonly (double lat, double lon)[][] _polygons = GetContinentPolygons();
