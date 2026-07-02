@@ -4,6 +4,14 @@ namespace ShipWatcher.NET.Views;
 
 public class TableShipView : IShipWatcherView
 {
+    private enum SortMode
+    {
+        Mmsi,
+        Name,
+        Speed,
+        Updated,
+    }
+
     private readonly VesselStore _store;
     private readonly Label _headerLabel;
     private readonly ListView _vesselList;
@@ -12,6 +20,8 @@ public class TableShipView : IShipWatcherView
     private long? _selectedMmsi;
     private int _scrollOffset;
     private bool _suppressSelectionEvents;
+    private SortMode _sortMode = SortMode.Mmsi;
+    private string _filter = "";
 
     public string ViewName => "TABLE";
 
@@ -21,7 +31,7 @@ public class TableShipView : IShipWatcherView
     {
         _store = store;
 
-        _headerLabel = new Label(FormatRow("MMSI", "Name", "Position", "SOG", "COG", "HDG", "Status", "Destination"))
+        _headerLabel = new Label(HeaderText())
         {
             X = 0,
             Y = 0,
@@ -65,7 +75,39 @@ public class TableShipView : IShipWatcherView
             if (idx >= 0 && idx < _sortedVessels.Count)
                 ShowVesselDetail(_sortedVessels[idx]);
         };
+
+        _vesselList.KeyPress += args =>
+        {
+            if ((char)args.KeyEvent.KeyValue is 'o' or 'O')
+            {
+                CycleSortMode();
+                args.Handled = true;
+            }
+        };
     }
+
+    private void CycleSortMode()
+    {
+        var modes = Enum.GetValues<SortMode>();
+        _sortMode = modes[((int)_sortMode + 1) % modes.Length];
+        _headerLabel.Text = HeaderText();
+        Refresh(_filter);
+    }
+
+    private string HeaderText() =>
+        FormatRow("MMSI", "Name", "Position", "SOG", "COG", "HDG", "Status", "Destination") +
+        $"  [O: sort by {_sortMode}]";
+
+    private IOrderedEnumerable<Vessel> ApplySort(IEnumerable<Vessel> vessels) => _sortMode switch
+    {
+        SortMode.Name => vessels
+            .OrderBy(v => string.IsNullOrEmpty(v.Name) ? 1 : 0) // named vessels first
+            .ThenBy(v => v.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(v => v.MMSI),
+        SortMode.Speed => vessels.OrderByDescending(v => v.Speed).ThenBy(v => v.MMSI),
+        SortMode.Updated => vessels.OrderByDescending(v => v.LastUpdate).ThenBy(v => v.MMSI),
+        _ => vessels.OrderBy(v => v.MMSI),
+    };
 
     public IEnumerable<View> GetViews() => [_headerLabel, _vesselList];
 
@@ -83,11 +125,11 @@ public class TableShipView : IShipWatcherView
 
     public void Refresh(string filter)
     {
-        _sortedVessels = _store.Vessels.Values
+        _filter = filter;
+        _sortedVessels = ApplySort(_store.Vessels.Values
             .Where(v => string.IsNullOrEmpty(filter) ||
                          v.Name.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
-                         v.MMSI.ToString().Contains(filter))
-            .OrderBy(v => v.MMSI)
+                         v.MMSI.ToString().Contains(filter)))
             .ToList();
 
         _vesselRows = _sortedVessels
