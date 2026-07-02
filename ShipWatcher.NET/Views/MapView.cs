@@ -12,6 +12,16 @@ public class MapView(VesselStore store) : View
 
     private string _filter = "";
 
+    private readonly List<(Vessel vessel, int col, int row)> _visibleVessels = [];
+    private long? _selectedMmsi;
+
+    /// <summary>Raised when the user cycles the vessel selection (n/p keys).</summary>
+    public event Action<Vessel?>? VesselSelected;
+
+    /// <summary>Current snapshot of the selected vessel, if it is still in the store.</summary>
+    public Vessel? SelectedVessel =>
+        _selectedMmsi.HasValue && store.Vessels.TryGetValue(_selectedMmsi.Value, out var v) ? v : null;
+
     private static readonly double[] LatSpans = [180, 120, 80, 50, 30, 18, 10, 5, 3, 1.5];
 
     private readonly (double lat, double lon)[][] _polygons = GetContinentPolygons();
@@ -59,6 +69,16 @@ public class MapView(VesselStore store) : View
             SetNeedsDisplay();
             return true;
         }
+        if (keyEvent.KeyValue is 'n' or 'N')
+        {
+            CycleSelection(1);
+            return true;
+        }
+        if (keyEvent.KeyValue is 'p' or 'P')
+        {
+            CycleSelection(-1);
+            return true;
+        }
 
         double step = LatSpans[_zoomLevel] * 0.1;
         switch (keyEvent.Key)
@@ -82,6 +102,22 @@ public class MapView(VesselStore store) : View
         }
 
         return base.ProcessKey(keyEvent);
+    }
+
+    private void CycleSelection(int direction)
+    {
+        if (_visibleVessels.Count == 0)
+            return;
+
+        var ordered = _visibleVessels.OrderBy(v => v.vessel.MMSI).ToList();
+        var idx = ordered.FindIndex(v => v.vessel.MMSI == _selectedMmsi);
+        idx = idx < 0
+            ? (direction > 0 ? 0 : ordered.Count - 1)
+            : (idx + direction + ordered.Count) % ordered.Count;
+
+        _selectedMmsi = ordered[idx].vessel.MMSI;
+        VesselSelected?.Invoke(ordered[idx].vessel);
+        SetNeedsDisplay();
     }
 
     public override void Redraw(Rect bounds)
@@ -172,7 +208,7 @@ public class MapView(VesselStore store) : View
         }
 
         // Draw ships
-        int shipCount = 0;
+        _visibleVessels.Clear();
         foreach (var vessel in store.Vessels.Values)
         {
             if (!string.IsNullOrEmpty(_filter) &&
@@ -190,16 +226,18 @@ public class MapView(VesselStore store) : View
 
             if (col >= 0 && col < w && row >= 0 && row < h)
             {
+                _visibleVessels.Add((vessel, col, row));
                 Driver.SetAttribute(shipAttr);
                 Move(col, row);
                 Driver.AddRune((System.Rune)'*');
-                shipCount++;
             }
         }
 
+        DrawSelectionHighlight(w);
+
         // Info bar
         Driver.SetAttribute(infoAttr);
-        string info = $" Zoom {_zoomLevel + 1}/{LatSpans.Length} | {latSpan:F1}\u00b0 | {shipCount} ships | +/- zoom | arrows pan ";
+        string info = $" Zoom {_zoomLevel + 1}/{LatSpans.Length} | {latSpan:F1}\u00b0 | {_visibleVessels.Count} ships | +/- zoom | arrows pan | n/p select ";
         int infoX = Math.Max(0, w - info.Length);
         Move(infoX, 0);
         foreach (char c in info)
@@ -211,6 +249,33 @@ public class MapView(VesselStore store) : View
         Move(0, h - 1);
         foreach (char c in coords)
             Driver.AddRune((System.Rune)c);
+    }
+
+    private void DrawSelectionHighlight(int w)
+    {
+        if (_selectedMmsi is null)
+            return;
+
+        var idx = _visibleVessels.FindIndex(v => v.vessel.MMSI == _selectedMmsi);
+        if (idx < 0)
+            return;
+
+        var (vessel, col, row) = _visibleVessels[idx];
+
+        var selectedAttr = Application.Driver.MakeAttribute(Color.Black, Color.BrightYellow);
+        Driver.SetAttribute(selectedAttr);
+        Move(col, row);
+        Driver.AddRune((System.Rune)'*');
+
+        // Name tag next to the marker, flipped left if it would run off-screen
+        var label = $" {(string.IsNullOrWhiteSpace(vessel.Name) ? vessel.MMSI.ToString() : vessel.Name)} ";
+        var labelX = col + 1 + label.Length <= w ? col + 1 : Math.Max(0, col - label.Length);
+        Move(labelX, row);
+        foreach (char c in label)
+        {
+            if (labelX++ >= w) break;
+            Driver.AddRune((System.Rune)c);
+        }
     }
 
     private bool IsLand(double lat, double lon)
