@@ -126,32 +126,44 @@ public class AisClient(VesselStore store, string apiKey, double[][][] boundingBo
             store.Upsert(meta.MMSI, vessel =>
             {
                 if (!string.IsNullOrWhiteSpace(meta.ShipName))
-                    vessel.Name = meta.ShipName.Trim();
+                    vessel = vessel with { Name = meta.ShipName.Trim() };
 
-                vessel.Latitude = meta.Latitude;
-                vessel.Longitude = meta.Longitude;
-                vessel.LastUpdate = meta.TimeUtc;
-
-                switch (envelope.MessageType)
+                vessel = vessel with
                 {
-                    case "PositionReport" when envelope.Message.PositionReport is { } pr:
-                        vessel.Speed = pr.Sog;
-                        vessel.Course = pr.Cog;
-                        vessel.Heading = pr.TrueHeading;
-                        vessel.NavStatus = pr.NavigationalStatus;
-                        break;
+                    Latitude = meta.Latitude,
+                    Longitude = meta.Longitude,
+                    LastUpdate = DateTimeOffset.UtcNow,
+                    ProviderTimestamp = meta.TimeUtc,
+                };
 
-                    case "ShipStaticData" when envelope.Message.ShipStaticData is { } sd:
-                        vessel.Destination = sd.Destination?.Trim() ?? "";
-                        vessel.CallSign = sd.CallSign?.Trim() ?? "";
-                        break;
+                return envelope.MessageType switch
+                {
+                    "PositionReport" when envelope.Message.PositionReport is { } pr => vessel with
+                    {
+                        Speed = pr.Sog,
+                        Course = pr.Cog,
+                        Heading = pr.TrueHeading,
+                        NavStatus = pr.NavigationalStatus,
+                    },
 
-                    case "StandardClassBPositionReport" when envelope.Message.StandardClassBPositionReport is { } cb:
-                        vessel.Speed = cb.Sog;
-                        vessel.Course = cb.Cog;
-                        vessel.Heading = cb.TrueHeading;
-                        break;
-                }
+                    "ShipStaticData" when envelope.Message.ShipStaticData is { } sd => vessel with
+                    {
+                        Destination = sd.Destination?.Trim() ?? "",
+                        CallSign = sd.CallSign?.Trim() ?? "",
+                        ShipType = sd.Type,
+                        Draught = sd.Draught,
+                        Eta = sd.Eta,
+                    },
+
+                    "StandardClassBPositionReport" when envelope.Message.StandardClassBPositionReport is { } cb => vessel with
+                    {
+                        Speed = cb.Sog,
+                        Course = cb.Cog,
+                        Heading = cb.TrueHeading,
+                    },
+
+                    _ => vessel
+                };
             });
 
             OnDataUpdated?.Invoke();

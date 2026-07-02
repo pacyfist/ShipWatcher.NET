@@ -106,39 +106,48 @@ public class KystverketAisClient(VesselStore store) : IAisDataSource, ISourceDes
                 return;
 
             MessageCount++;
-            store.Upsert(result.MMSI, vessel =>
+            var now = DateTimeOffset.UtcNow;
+            store.Upsert(result.MMSI, vessel => result.MessageType switch
             {
-                switch (result.MessageType)
+                NmeaMessageType.PositionReport => vessel with
                 {
-                    case NmeaMessageType.PositionReport:
-                        vessel.Latitude = result.Latitude;
-                        vessel.Longitude = result.Longitude;
-                        vessel.Speed = result.Sog;
-                        vessel.Course = result.Cog;
-                        vessel.Heading = result.TrueHeading;
-                        vessel.NavStatus = result.NavigationalStatus;
-                        vessel.LastUpdate = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
-                        break;
+                    Latitude = result.Latitude,
+                    Longitude = result.Longitude,
+                    Speed = result.Sog,
+                    Course = result.Cog,
+                    Heading = result.TrueHeading,
+                    NavStatus = result.NavigationalStatus,
+                    LastUpdate = now,
+                },
 
-                    case NmeaMessageType.StaticData:
-                        if (!string.IsNullOrWhiteSpace(result.Name))
-                            vessel.Name = result.Name;
-                        if (!string.IsNullOrWhiteSpace(result.CallSign))
-                            vessel.CallSign = result.CallSign;
-                        if (!string.IsNullOrWhiteSpace(result.Destination))
-                            vessel.Destination = result.Destination;
-                        vessel.LastUpdate = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
-                        break;
+                NmeaMessageType.StaticData => vessel with
+                {
+                    Name = string.IsNullOrWhiteSpace(result.Name) ? vessel.Name : result.Name,
+                    CallSign = string.IsNullOrWhiteSpace(result.CallSign) ? vessel.CallSign : result.CallSign,
+                    Destination = string.IsNullOrWhiteSpace(result.Destination) ? vessel.Destination : result.Destination,
+                    ShipType = result.ShipType,
+                    Draught = result.Draught,
+                    Eta = new EtaInfo
+                    {
+                        Month = result.EtaMonth,
+                        Day = result.EtaDay,
+                        Hour = result.EtaHour,
+                        Minute = result.EtaMinute,
+                    },
+                    LastUpdate = now,
+                },
 
-                    case NmeaMessageType.ClassBPositionReport:
-                        vessel.Latitude = result.Latitude;
-                        vessel.Longitude = result.Longitude;
-                        vessel.Speed = result.Sog;
-                        vessel.Course = result.Cog;
-                        vessel.Heading = result.TrueHeading;
-                        vessel.LastUpdate = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
-                        break;
-                }
+                NmeaMessageType.ClassBPositionReport => vessel with
+                {
+                    Latitude = result.Latitude,
+                    Longitude = result.Longitude,
+                    Speed = result.Sog,
+                    Course = result.Cog,
+                    Heading = result.TrueHeading,
+                    LastUpdate = now,
+                },
+
+                _ => vessel
             });
 
             OnDataUpdated?.Invoke();

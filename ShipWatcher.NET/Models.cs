@@ -116,19 +116,32 @@ public record StandardClassBPositionReport
     public int TrueHeading { get; init; }
 }
 
-public class Vessel
+/// <summary>
+/// Immutable snapshot of a vessel's state. Updates go through
+/// <see cref="VesselStore.Upsert"/>, which swaps in a new instance atomically,
+/// so readers never observe a torn lat/lon pair and no locking is needed.
+/// </summary>
+public record Vessel
 {
-    public long MMSI { get; set; }
-    public string Name { get; set; } = "";
-    public double Latitude { get; set; }
-    public double Longitude { get; set; }
-    public double Speed { get; set; }
-    public double Course { get; set; }
-    public int Heading { get; set; }
-    public string Destination { get; set; } = "";
-    public string CallSign { get; set; } = "";
-    public int NavStatus { get; set; }
-    public string LastUpdate { get; set; } = "";
+    public required long MMSI { get; init; }
+    public string Name { get; init; } = "";
+    public double Latitude { get; init; }
+    public double Longitude { get; init; }
+    public double Speed { get; init; }
+    public double Course { get; init; }
+    public int Heading { get; init; }
+    public string Destination { get; init; } = "";
+    public string CallSign { get; init; } = "";
+    public int NavStatus { get; init; }
+    public int ShipType { get; init; }
+    public double Draught { get; init; }
+    public EtaInfo? Eta { get; init; }
+
+    /// <summary>When we last received any message for this vessel (local receipt time).</summary>
+    public DateTimeOffset LastUpdate { get; init; }
+
+    /// <summary>Raw timestamp string from the provider, if it supplies one.</summary>
+    public string ProviderTimestamp { get; init; } = "";
 
     public string NavStatusText => NavStatus switch
     {
@@ -144,6 +157,53 @@ public class Vessel
         14 => "AIS-SART",
         _ => "Unknown"
     };
+
+    public string ShipTypeText => ShipType switch
+    {
+        0 => "N/A",
+        30 => "Fishing",
+        31 or 32 => "Towing",
+        33 => "Dredging",
+        34 => "Diving ops",
+        35 => "Military",
+        36 => "Sailing",
+        37 => "Pleasure craft",
+        >= 40 and <= 49 => "High-speed craft",
+        50 => "Pilot",
+        51 => "Search & rescue",
+        52 => "Tug",
+        53 => "Port tender",
+        54 => "Anti-pollution",
+        55 => "Law enforcement",
+        58 => "Medical",
+        >= 60 and <= 69 => "Passenger",
+        >= 70 and <= 79 => "Cargo",
+        >= 80 and <= 89 => "Tanker",
+        >= 90 and <= 99 => "Other",
+        _ => $"Type {ShipType}"
+    };
+
+    public string EtaText =>
+        Eta is null || Eta.Month == 0
+            ? "N/A"
+            : $"{Eta.Month:D2}-{Eta.Day:D2} {Eta.Hour:D2}:{Eta.Minute:D2}";
+
+    public string AgeText
+    {
+        get
+        {
+            if (LastUpdate == default)
+                return "never";
+
+            var age = DateTimeOffset.UtcNow - LastUpdate;
+            if (age < TimeSpan.Zero)
+                age = TimeSpan.Zero;
+
+            return age.TotalSeconds < 60 ? $"{(int)age.TotalSeconds}s ago"
+                 : age.TotalMinutes < 60 ? $"{(int)age.TotalMinutes}m ago"
+                 : $"{(int)age.TotalHours}h ago";
+        }
+    }
 
     public string CoordinateString =>
         $"{Math.Abs(Latitude):F4}\u00b0{(Latitude >= 0 ? "N" : "S")} {Math.Abs(Longitude):F4}\u00b0{(Longitude >= 0 ? "E" : "W")}";

@@ -7,6 +7,9 @@ namespace ShipWatcher.NET;
 
 public class AppShell(VesselStore vesselStore, IServiceProvider serviceProvider, int defaultSourceIndex = 0)
 {
+    /// <summary>Vessels without an update for this long are removed from the store.</summary>
+    private static readonly TimeSpan VesselMaxAge = TimeSpan.FromMinutes(15);
+
     private List<IShipWatcherView> _views = [];
     private List<IAisDataSource> _sources = [];
     private readonly CancellationTokenSource _cts = new();
@@ -74,9 +77,9 @@ public class AppShell(VesselStore vesselStore, IServiceProvider serviceProvider,
                 if (v is not null)
                 {
                     detailLabel.Text =
-                        $"MMSI: {v.MMSI}  Name: {v.Name}  Call: {v.CallSign}  Dest: {v.Destination}\n" +
+                        $"MMSI: {v.MMSI}  Name: {v.Name}  Call: {v.CallSign}  Type: {v.ShipTypeText}\n" +
                         $"Pos: {v.CoordinateString}  SOG: {v.Speed:F1}kn  COG: {v.Course:F1}\u00b0  HDG: {v.Heading}\u00b0  Status: {v.NavStatusText}\n" +
-                        $"Last Update: {v.LastUpdate}";
+                        $"Dest: {v.Destination}  Draught: {v.Draught:F1}m  ETA: {v.EtaText}  Updated: {v.AgeText}";
                 }
             };
         }
@@ -109,6 +112,15 @@ public class AppShell(VesselStore vesselStore, IServiceProvider serviceProvider,
         Application.MainLoop.AddTimeout(TimeSpan.FromSeconds(2), (_) =>
         {
             RefreshActiveView();
+            return true;
+        });
+
+        // Prune vessels that have gone quiet so the store doesn't grow forever
+        Application.MainLoop.AddTimeout(TimeSpan.FromSeconds(30), (_) =>
+        {
+            var removed = vesselStore.Prune(VesselMaxAge);
+            if (removed > 0)
+                RefreshActiveView();
             return true;
         });
 

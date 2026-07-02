@@ -148,19 +148,22 @@ public class TableShipView : IShipWatcherView
 
     private static void ShowVesselDetail(Vessel v)
     {
-        var dlg = new Dialog($"Vessel: {v.Name}", 60, 14);
+        var dlg = new Dialog($"Vessel: {v.Name}", 60, 18);
 
         var info = new Label(
             $"MMSI:        {v.MMSI}\n" +
             $"Name:        {v.Name}\n" +
             $"Call Sign:   {v.CallSign}\n" +
+            $"Ship Type:   {v.ShipTypeText}\n" +
             $"Position:    {v.CoordinateString}\n" +
             $"Speed:       {v.Speed:F1} knots\n" +
             $"Course:      {v.Course:F1}\u00b0\n" +
             $"Heading:     {(v.Heading == 511 ? "N/A" : $"{v.Heading}\u00b0")}\n" +
             $"Nav Status:  {v.NavStatusText}\n" +
-            $"Destination:  {v.Destination}\n" +
-            $"Last Update: {v.LastUpdate}"
+            $"Destination: {v.Destination}\n" +
+            $"Draught:     {(v.Draught > 0 ? $"{v.Draught:F1} m" : "N/A")}\n" +
+            $"ETA:         {v.EtaText}\n" +
+            $"Last Update: {v.LastUpdate:yyyy-MM-dd HH:mm:ss} UTC ({v.AgeText})"
         )
         {
             X = 1,

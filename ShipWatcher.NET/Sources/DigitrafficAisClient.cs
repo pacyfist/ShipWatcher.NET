@@ -115,29 +115,32 @@ public class DigitrafficAisClient(VesselStore store) : IAisDataSource, ISourceDe
 
         if (coords.Length < 2) return;
 
-        store.Upsert(feature.Mmsi, vessel =>
+        store.Upsert(feature.Mmsi, vessel => vessel with
         {
-            vessel.Longitude = coords[0];
-            vessel.Latitude = coords[1];
-            vessel.Speed = props.Sog ?? 0;
-            vessel.Course = props.Cog ?? 0;
-            vessel.Heading = props.Heading ?? 511;
-            vessel.NavStatus = props.NavStat ?? 15;
-            // Use current time as LastUpdate to show when we received the data
-            vessel.LastUpdate = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
+            Longitude = coords[0],
+            Latitude = coords[1],
+            Speed = props.Sog ?? 0,
+            Course = props.Cog ?? 0,
+            Heading = props.Heading ?? 511,
+            NavStatus = props.NavStat ?? 15,
+            LastUpdate = DateTimeOffset.UtcNow,
+            ProviderTimestamp = props.TimestampExternal > 0
+                ? DateTimeOffset.FromUnixTimeMilliseconds(props.TimestampExternal).ToString("yyyy-MM-dd HH:mm:ss")
+                : vessel.ProviderTimestamp,
         });
     }
 
     private void UpdateVesselMetadata(DigitrafficVessel v)
     {
-        store.Upsert(v.Mmsi, vessel =>
+        // The metadata endpoint lists the whole vessel registry; only enrich
+        // vessels we actually have a position for, so pruning isn't fighting
+        // thousands of position-less entries every poll.
+        store.UpdateIfExists(v.Mmsi, vessel => vessel with
         {
-            if (!string.IsNullOrWhiteSpace(v.Name))
-                vessel.Name = v.Name.Trim();
-            if (!string.IsNullOrWhiteSpace(v.CallSign))
-                vessel.CallSign = v.CallSign.Trim();
-            if (!string.IsNullOrWhiteSpace(v.Destination))
-                vessel.Destination = v.Destination.Trim();
+            Name = string.IsNullOrWhiteSpace(v.Name) ? vessel.Name : v.Name.Trim(),
+            CallSign = string.IsNullOrWhiteSpace(v.CallSign) ? vessel.CallSign : v.CallSign.Trim(),
+            Destination = string.IsNullOrWhiteSpace(v.Destination) ? vessel.Destination : v.Destination.Trim(),
+            ShipType = v.ShipType ?? vessel.ShipType,
         });
     }
 

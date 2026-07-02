@@ -4,23 +4,58 @@ namespace ShipWatcher.NET;
 
 public class VesselStore
 {
-    public ConcurrentDictionary<long, Vessel> Vessels { get; } = new();
+    private readonly ConcurrentDictionary<long, Vessel> _vessels = new();
 
-    public Vessel GetOrAdd(long mmsi)
+    public IReadOnlyDictionary<long, Vessel> Vessels => _vessels;
+
+    public int Count => _vessels.Count;
+
+    /// <summary>
+    /// Atomically create or update a vessel. The update function receives the
+    /// current snapshot and returns a new one (typically via a `with` expression).
+    /// </summary>
+    public void Upsert(long mmsi, Func<Vessel, Vessel> update)
     {
-        return Vessels.GetOrAdd(mmsi, m => new Vessel { MMSI = m });
+        _vessels.AddOrUpdate(
+            mmsi,
+            m => update(new Vessel { MMSI = m }),
+            (_, existing) => update(existing));
     }
 
-    public void Upsert(long mmsi, Action<Vessel> updateAction)
+    /// <summary>
+    /// Update a vessel only if it already exists. Used for bulk metadata feeds
+    /// that list vessels we may never receive a position for.
+    /// </summary>
+    public void UpdateIfExists(long mmsi, Func<Vessel, Vessel> update)
     {
-        var vessel = GetOrAdd(mmsi);
-        lock (vessel)
+        while (_vessels.TryGetValue(mmsi, out var existing))
         {
-            updateAction(vessel);
+            if (_vessels.TryUpdate(mmsi, update(existing), existing))
+                return;
         }
     }
 
-    public List<Vessel> GetAll() => Vessels.Values.ToList();
+    /// <summary>Remove vessels not updated within <paramref name="maxAge"/>. Returns the number removed.</summary>
+    public int Prune(TimeSpan maxAge)
+    {
+        var cutoff = DateTimeOffset.UtcNow - maxAge;
+        var removed = 0;
 
-    public void Clear() => Vessels.Clear();
+        foreach (var (mmsi, vessel) in _vessels)
+        {
+            // KeyValuePair overload only removes if the value is still this exact
+            // snapshot, so a vessel updated concurrently is left alone.
+            if (vessel.LastUpdate < cutoff &&
+                _vessels.TryRemove(KeyValuePair.Create(mmsi, vessel)))
+            {
+                removed++;
+            }
+        }
+
+        return removed;
+    }
+
+    public List<Vessel> GetAll() => _vessels.Values.ToList();
+
+    public void Clear() => _vessels.Clear();
 }
