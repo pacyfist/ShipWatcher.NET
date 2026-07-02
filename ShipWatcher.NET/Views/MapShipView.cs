@@ -22,6 +22,11 @@ public class MapShipView : IShipWatcherView
         };
 
         _mapView.VesselSelected += v => VesselSelected?.Invoke(v);
+        _mapView.VesselOpened += v =>
+        {
+            if (_mapView.App is { } app)
+                VesselDetailDialog.Show(app, v);
+        };
     }
 
     public IEnumerable<View> GetViews() => [_mapView];

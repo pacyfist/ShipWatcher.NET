@@ -42,6 +42,61 @@ public class MapView : View
         KeyBindings.Add(new Key('_'), Command.ZoomOut);
         KeyBindings.Add(Key.N, Command.FindNext);
         KeyBindings.Add(Key.P, Command.FindPrevious);
+
+        // Positional hit-testing needs the raw click coordinates, so this uses
+        // the low-level MouseEvent (sanctioned for exactly this case) rather
+        // than MouseBindings. Position is Viewport-relative in v2, matching
+        // the coordinates ships are drawn at.
+        MouseEvent += (_, e) =>
+        {
+            if (e.Position is not { } pos)
+                return;
+
+            if (e.Flags.HasFlag(MouseFlags.LeftButtonDoubleClicked))
+            {
+                if (SelectAt(pos.X, pos.Y) && SelectedVessel is { } vessel)
+                    VesselOpened?.Invoke(vessel);
+                e.Handled = true;
+            }
+            else if (e.Flags.HasFlag(MouseFlags.LeftButtonClicked))
+            {
+                SetFocus();
+                SelectAt(pos.X, pos.Y);
+                e.Handled = true;
+            }
+        };
+    }
+
+    /// <summary>How far (in cells) a click may land from a ship and still select it.</summary>
+    private const int ClickTolerance = 2;
+
+    /// <summary>
+    /// Selects the visible vessel nearest to the clicked cell, if any is within
+    /// <see cref="ClickTolerance"/>. Clicks on empty water keep the current selection.
+    /// </summary>
+    private bool SelectAt(int col, int row)
+    {
+        Vessel? nearest = null;
+        var nearestDist = int.MaxValue;
+
+        foreach (var (vessel, vcol, vrow) in _visibleVessels)
+        {
+            // Chebyshev distance: "within N cells" means an N-cell square around the marker
+            var dist = Math.Max(Math.Abs(vcol - col), Math.Abs(vrow - row));
+            if (dist < nearestDist)
+            {
+                nearestDist = dist;
+                nearest = vessel;
+            }
+        }
+
+        if (nearest is null || nearestDist > ClickTolerance)
+            return false;
+
+        _selectedMmsi = nearest.MMSI;
+        VesselSelected?.Invoke(nearest);
+        SetNeedsDraw();
+        return true;
     }
 
     private bool Pan(int latSteps, int lonSteps)
@@ -65,8 +120,11 @@ public class MapView : View
     private readonly List<(Vessel vessel, int col, int row)> _visibleVessels = [];
     private long? _selectedMmsi;
 
-    /// <summary>Raised when the user cycles the vessel selection (n/p keys).</summary>
+    /// <summary>Raised when the user selects a vessel (n/p keys or mouse click).</summary>
     public event Action<Vessel?>? VesselSelected;
+
+    /// <summary>Raised when the user requests the vessel detail dialog (double-click).</summary>
+    public event Action<Vessel>? VesselOpened;
 
     /// <summary>Current snapshot of the selected vessel, if it is still in the store.</summary>
     public Vessel? SelectedVessel =>
@@ -198,7 +256,7 @@ public class MapView : View
 
         // Info bar
         SetAttribute(infoAttr);
-        string info = $" Zoom {_zoomLevel + 1}/{LatSpans.Length} | {latSpan:F1}\u00b0 | {_visibleVessels.Count} ships | +/- zoom | arrows pan | n/p select ";
+        string info = $" Zoom {_zoomLevel + 1}/{LatSpans.Length} | {latSpan:F1}\u00b0 | {_visibleVessels.Count} ships | +/- zoom | arrows pan | n/p/click select ";
         int infoX = Math.Max(0, w - info.Length);
         Move(infoX, 0);
         AddStr(info);
